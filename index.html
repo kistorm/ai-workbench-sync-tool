@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NEXUS Workbench</title>
+    <style>
+      html, body { margin: 0; background: #08080f; }
+    </style>
+    <script>
+      // 开发期错误可视化：任何脚本错误直接显示在页面上
+      (function () {
+        function show(title, detail) {
+          var el = document.createElement("pre");
+          el.style.cssText =
+            "position:fixed;inset:0;z-index:99999;margin:0;padding:24px;background:#12060b;" +
+            "color:#ff8a8a;font:12px/1.6 monospace;white-space:pre-wrap;overflow:auto";
+          el.textContent = "NEXUS 启动失败\n\n" + title + "\n\n" + detail;
+          document.body && document.body.appendChild(el);
+        }
+        window.addEventListener("error", function (e) {
+          show(e.message || "Unknown error", (e.error && e.error.stack) || (e.filename + ":" + e.lineno));
+        });
+        window.addEventListener("unhandledrejection", function (e) {
+          var r = e.reason;
+          show("Unhandled promise rejection", (r && (r.stack || r.message)) || String(r));
+        });
+      })();
+    </script>
+  </head>
+
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
