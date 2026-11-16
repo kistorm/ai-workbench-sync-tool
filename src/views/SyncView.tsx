@@ -80,9 +80,18 @@ export function SyncView({ theme, onThemeChange, appName, onAppNameChange }: Syn
 
   async function saveConfig() {
     if (!cfg) return;
+    const oldPwd = cfgQ.data?.encrypt_password ?? "";
+    const pwdChanged = oldPwd !== cfg.encrypt_password;
     const r = await run("save", () => api.saveSyncConfig(cfg));
     if (r.ok) {
       push("ok", "设置已保存");
+      if (pwdChanged && cfg.encrypt_password) {
+        push(
+          "info",
+          "主密码已变更",
+          "请立即执行一次「立即全量推送」，用新密码重新加密云端内容；否则下次拉取会因密码不匹配而解密失败。"
+        );
+      }
       void cfgQ.reload();
       void repo.reload();
     } else push("err", "保存失败", r.error);

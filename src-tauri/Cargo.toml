@@ -38,3 +38,8 @@ lto = true
 opt-level = 3
 panic = "abort"
 strip = true
+
+# 减小 target 体积（磁盘紧张）
+[profile.dev]
+debug = 0
+incremental = false

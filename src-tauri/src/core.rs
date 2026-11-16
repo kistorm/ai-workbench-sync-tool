@@ -58,6 +58,8 @@ pub struct AppConfig {
     pub auto_sync_enabled: bool,
     /// 加密主密码：非空时，所有同步内容会逐文件加密后上传
     pub encrypt_password: String,
+    /// 是否已完成首次引导
+    pub onboarded: bool,
 }
 
 impl Default for AppConfig {
@@ -73,6 +75,7 @@ impl Default for AppConfig {
             electerm_cmd: "electerm".into(),
             auto_sync_enabled: true,
             encrypt_password: String::new(),
+            onboarded: false,
         }
     }
 }

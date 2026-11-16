@@ -112,12 +112,18 @@ pnpm tauri dev          # development
 pnpm tauri build        # production bundle (.deb / AppImage / dmg / exe)
 ```
 
-### First-run setup
+### First-run setup (guided)
 
-1. Open **Settings → Git repo** and fill in your private repo URL + SSH key path
-2. Set the **Electerm command** (auto-detect available)
-3. Import or add SSH hosts in the **SSH** page
-4. Configure paths: SSH dir (`~/.ssh`), notes dir, AI-sync script dir
+On first launch you get an onboarding screen with two modes:
+
+| Mode | Flow |
+|---|---|
+| **Recover** | Connect repo → pull everything → decrypt with master password → regenerate `~/.ssh/config` |
+| **Fresh** | Connect an **empty** repo → encrypt local data with master password → initial push |
+
+Both modes require the Git repo URL and an encryption master password. Afterwards, configure Electerm and add hosts in the **SSH** page.
+
+> Changing the master password later: edit it in Settings, then immediately run a **full push** so the cloud copy is re-encrypted with the new password. Otherwise pulls will fail to decrypt.
 
 ---
 

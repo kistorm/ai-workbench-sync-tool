@@ -7,6 +7,7 @@ import { SyncView } from "./views/SyncView";
 import { ToastProvider } from "./components/ui";
 import { AppTasksProvider, useAppTasks } from "./store";
 import { TerminalWorkspace } from "./components/TerminalWorkspace";
+import { Onboarding } from "./views/Onboarding";
 import { api } from "./api";
 import { useAsync } from "./hooks";
 import type { TabKey } from "./data";
@@ -41,6 +42,7 @@ export default function App() {
 }
 
 function Shell() {
+  const onboard = useAsync(() => api.onboardStatus(), []);
   const [tab, setTab] = useState<TabKey>("dashboard");
   const [theme, setTheme] = useState<ThemeKey>(loadTheme);
   const [appName, setAppName] = useState(loadAppName);
@@ -101,6 +103,18 @@ function Shell() {
     hostname: h.hostname,
     user: h.user,
   }));
+
+  // 首次使用引导
+  if (onboard.loading) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-[var(--color-nexus-bg)]">
+        <span className="font-mono text-xs text-[var(--color-nexus-text-faint)]">加载中…</span>
+      </div>
+    );
+  }
+  if (!onboard.data?.onboarded) {
+    return <Onboarding onDone={() => void onboard.reload()} />;
+  }
 
   return (
     <>

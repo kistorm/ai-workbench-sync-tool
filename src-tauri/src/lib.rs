@@ -3,6 +3,7 @@ mod core;
 mod crypto;
 mod cron;
 mod notes;
+mod onboard;
 mod ssh;
 mod sync;
 mod terminal;
@@ -75,6 +76,9 @@ pub fn run() {
             core::log_activity,
             core::get_running_action,
             core::app_info,
+            // onboarding
+            onboard::onboard_status,
+            onboard::onboard,
             core::has_password,
             // ssh
             ssh::list_hosts,

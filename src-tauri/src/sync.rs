@@ -134,7 +134,7 @@ pub fn apply_remote(dir: &Path, repo: &str) -> Result<(), String> {
 }
 
 /// 当前分支名
-fn current_branch(dir: &Path) -> String {
+pub(crate) fn current_branch(dir: &Path) -> String {
     run_cmd_dir("git", &["branch", "--show-current"], dir, &[])
         .ok()
         .map(|r| r.stdout.trim().to_string())
@@ -143,7 +143,7 @@ fn current_branch(dir: &Path) -> String {
 }
 
 /// 远端是否已有该分支（空仓库首次推送时没有）
-fn remote_has_branch(dir: &Path, branch: &str) -> bool {
+pub(crate) fn remote_has_branch(dir: &Path, branch: &str) -> bool {
     run_cmd_dir("git", &["ls-remote", "--heads", "origin", branch], dir, &[])
         .map(|r| r.ok && !r.stdout.trim().is_empty())
         .unwrap_or(false)

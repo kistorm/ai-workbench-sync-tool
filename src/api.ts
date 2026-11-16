@@ -84,6 +84,11 @@ export interface ClearResult {
   bytes: number;
 }
 
+export interface OnboardStatus {
+  onboarded: boolean;
+  git_repo: string;
+}
+
 export interface ElectermInfo {
   found: boolean;
   path: string;
@@ -156,6 +161,11 @@ export interface AppInfo {
 // ==================== API ====================
 
 export const api = {
+  // onboarding
+  onboardStatus: () => invoke<OnboardStatus>("onboard_status"),
+  onboard: (mode: "recover" | "fresh", gitRepo: string, password: string) =>
+    invoke<string>("onboard", { mode, gitRepo, password }),
+
   // core
   getSyncConfig: () => invoke<AppConfig>("get_sync_config"),
   saveSyncConfig: (config: AppConfig) => invoke<void>("save_sync_config", { config }),
