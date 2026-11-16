@@ -594,3 +594,55 @@ fn it_update_host_missing_is_error() {
         crate::ssh::update_host_impl(&state, "nope", "nope2", "1.1.1.1", "root", 22, true).is_err()
     );
 }
+
+// ==================== 全量加密同步 ====================
+
+#[test]
+fn it_encrypt_decrypt_all_content() {
+    let base = std::env::temp_dir().join(format!("nexus-enc-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    let repo = base.join("repo");
+    fs::create_dir_all(repo.join("notes/sub")).unwrap();
+    fs::write(repo.join("assh.yml"), "hosts:\n  a:\n    hostname: 1.1.1.1\n").unwrap();
+    fs::write(repo.join("notes/a.md"), "# note A").unwrap();
+    fs::write(repo.join("notes/sub/b.md"), "# note B").unwrap();
+
+    let state = AppState::init(base.join("data"));
+    crate::core::run_cmd("git", &["init", "-q", repo.to_str().unwrap()], &[]).unwrap();
+
+    // 加密
+    let n = crate::sync::encrypt_all(&state, &repo, "test-master-pass").unwrap();
+    assert_eq!(n, 3, "应加密 3 个文件");
+    assert!(repo.join("encrypted/assh.yml.enc").exists());
+    assert!(repo.join("encrypted/notes/a.md.enc").exists());
+    assert!(repo.join("encrypted/notes/sub/b.md.enc").exists());
+    assert!(repo.join(".enc_salt").exists());
+    // 明文被 gitignore 排除
+    let gi = fs::read_to_string(repo.join(".gitignore")).unwrap();
+    assert!(gi.contains("/assh.yml"));
+    assert!(gi.contains("/notes/"));
+
+    // 删除明文（模拟新机器拉取）
+    fs::remove_file(repo.join("assh.yml")).unwrap();
+    fs::remove_file(repo.join("notes/a.md")).unwrap();
+    fs::remove_file(repo.join("notes/sub/b.md")).unwrap();
+
+    // 解密恢复
+    let n2 = crate::sync::decrypt_all(&state, &repo, "test-master-pass").unwrap();
+    assert_eq!(n2, 3, "应解密 3 个文件");
+    assert_eq!(
+        fs::read_to_string(repo.join("assh.yml")).unwrap(),
+        "hosts:\n  a:\n    hostname: 1.1.1.1\n"
+    );
+    assert_eq!(fs::read_to_string(repo.join("notes/a.md")).unwrap(), "# note A");
+    assert_eq!(fs::read_to_string(repo.join("notes/sub/b.md")).unwrap(), "# note B");
+
+    // 错误主密码应失败且不破坏文件
+    fs::remove_file(repo.join("assh.yml")).unwrap();
+    let res = crate::sync::decrypt_all(&state, &repo, "wrong-pass");
+    // decrypt_all 对每个文件失败只记录，不 panic；返回计数为 0
+    assert!(matches!(res, Ok(0) | Err(_)));
+    assert!(!repo.join("assh.yml").exists(), "错误密码不应写出明文");
+
+    let _ = fs::remove_dir_all(&base);
+}

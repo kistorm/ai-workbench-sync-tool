@@ -33,6 +33,7 @@ fn derive_key(passphrase: &str, salt: &[u8]) -> [u8; 32] {
 }
 
 /// 加密明文（返回 base64 字符串）
+#[allow(dead_code)]
 pub fn encrypt(passphrase: &str, plaintext: &str) -> Result<String, String> {
     if passphrase.is_empty() {
         return Err("同步口令为空".into());
@@ -57,6 +58,7 @@ pub fn encrypt(passphrase: &str, plaintext: &str) -> Result<String, String> {
 }
 
 /// 解密（输入 base64 字符串）
+#[allow(dead_code)]
 pub fn decrypt(passphrase: &str, encoded: &str) -> Result<String, String> {
     if passphrase.is_empty() {
         return Err("同步口令为空".into());
@@ -80,6 +82,39 @@ pub fn decrypt(passphrase: &str, encoded: &str) -> Result<String, String> {
     String::from_utf8(pt).map_err(|e| format!("解密内容不是有效文本: {}", e))
 }
 
+/// 用已派生好的密钥加密（批量场景复用同一 key）
+pub fn encrypt_with_key(key: &[u8; 32], plaintext: &[u8]) -> Result<Vec<u8>, String> {
+    let mut nonce_bytes = [0u8; NONCE_LEN];
+    rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
+    let cipher =
+        Aes256Gcm::new_from_slice(key).map_err(|e| format!("初始化加密器失败: {}", e))?;
+    let ct = cipher
+        .encrypt(Nonce::from_slice(&nonce_bytes), plaintext)
+        .map_err(|e| format!("加密失败: {}", e))?;
+    let mut out = Vec::with_capacity(NONCE_LEN + ct.len());
+    out.extend_from_slice(&nonce_bytes);
+    out.extend_from_slice(&ct);
+    Ok(out)
+}
+
+/// 用已派生好的密钥解密
+pub fn decrypt_with_key(key: &[u8; 32], blob: &[u8]) -> Result<Vec<u8>, String> {
+    if blob.len() < NONCE_LEN + 16 {
+        return Err("密文长度异常".into());
+    }
+    let (nonce_bytes, ct) = blob.split_at(NONCE_LEN);
+    let cipher =
+        Aes256Gcm::new_from_slice(key).map_err(|e| format!("初始化解密器失败: {}", e))?;
+    cipher
+        .decrypt(Nonce::from_slice(nonce_bytes), ct)
+        .map_err(|_| "解密失败：主密码不正确，或数据已损坏".to_string())
+}
+
+/// 从口令 + 固定 salt 派生一次密钥（批量加密）
+pub fn derive_batch_key(passphrase: &str, salt: &[u8]) -> [u8; 32] {
+    derive_key(passphrase, salt)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -97,6 +132,20 @@ mod tests {
     fn wrong_passphrase_fails() {
         let enc = encrypt("right-key", "secret").unwrap();
         assert!(decrypt("wrong-key", &enc).is_err());
+    }
+
+    #[test]
+    fn batch_key_roundtrip() {
+        let salt = [7u8; SALT_LEN];
+        let key = derive_batch_key("batch-pass", &salt);
+        let plain = b"hello encrypted world";
+        let blob = encrypt_with_key(&key, plain).unwrap();
+        assert_ne!(&blob[..], plain);
+        let dec = decrypt_with_key(&key, &blob).unwrap();
+        assert_eq!(dec, plain);
+        // 错误 key 应失败
+        let wrong = derive_batch_key("wrong", &salt);
+        assert!(decrypt_with_key(&wrong, &blob).is_err());
     }
 
     #[test]

@@ -293,14 +293,14 @@ export function SyncView({ theme, onThemeChange, appName, onAppNameChange }: Syn
                 </div>
                 <div>
                   <label className="block font-mono text-[11px] text-[var(--color-nexus-text-dim)] mb-1.5">
-                    同步口令（可选 · 用于加密同步 SSH 密码）
+                    加密主密码（可选 · 全量加密同步内容）
                   </label>
                   <div className="flex gap-2">
                     <input
                       type={syncKeyVisible ? "text" : "password"}
-                      value={cfg.password_sync_key}
-                      onChange={(e) => update("password_sync_key", e.target.value)}
-                      placeholder="留空则不同步密码"
+                      value={cfg.encrypt_password}
+                      onChange={(e) => update("encrypt_password", e.target.value)}
+                      placeholder="留空则明文同步；设置后全部内容加密"
                       className={`${inputCls} flex-1`}
                     />
                     <button className="btn shrink-0" onClick={() => setSyncKeyVisible(!syncKeyVisible)}>
@@ -308,8 +308,9 @@ export function SyncView({ theme, onThemeChange, appName, onAppNameChange }: Syn
                     </button>
                   </div>
                   <p className="font-mono text-[10px] text-[var(--color-nexus-text-faint)] mt-1.5">
-                    设置后，本地密码库会加密为 <span className="text-[var(--color-neon-cyan)]">secrets.enc.json</span>
-                    随仓库同步；换机器时输入相同口令即可恢复密码。口令本身不入库。
+                    设置后，<span className="text-[var(--color-nexus-text)]">SSH 配置、笔记、AI 会话</span>会逐文件加密为
+                    <span className="text-[var(--color-neon-cyan)]"> encrypted/**/*.enc </span>
+                    再推送；拉取时用相同主密码解密还原。主密码本身不入库，请务必牢记。
                   </p>
                 </div>
                 <div className="flex justify-end">

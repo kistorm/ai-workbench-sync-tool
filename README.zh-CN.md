@@ -20,7 +20,7 @@
 
 | 模块 | 说明 |
 |---|---|
-| **SSH 管理** | 在 `assh.yml` 中管理主机（别名、跳板、模板继承、正则通配）；自动生成标准 `~/.ssh/config`；测试连通性；编辑连接信息；每主机密码保管，支持**可选加密同步** |
+| **SSH 管理** | 在 `assh.yml` 中管理主机（别名、跳板、模板继承、正则通配）；自动生成标准 `~/.ssh/config`；测试连通性；编辑连接信息；每主机密码本地保管 |
 | **内嵌终端** | 多标签 xterm.js 终端，背后是真实 PTY；保存过密码的主机自动登录；切换页面不断开 |
 | **Electerm 集成** | 把凭据通过命令行传给 Electerm 直接连接；自动探测程序路径；未安装时给出各平台下载提示 |
 | **AI 会话同步** | 同步 ZCode、Claude Code、Cursor、Trae、DeepSeek Harness（dsh）的会话数据到统一仓库 |
@@ -88,7 +88,7 @@
 | 强制恢复（设置） | `reset --hard origin/main`，远端完全覆盖本地 |
 | SSH 单独强制拉取 | 只恢复 `assh.yml`，不动笔记/AI 数据 |
 
-> **密码同步是可选的、加密的**。密码默认保存在本地 `secrets.json`（权限 600）。当在设置中配置「同步口令」后，密码库会用 AES-256-GCM（10 万轮 SHA-256 派生）加密为 `secrets.enc.json` 随仓库同步；口令本身永不离开本机。
+> **全量内容加密是可选的**。在设置中配置「加密主密码」后，所有同步文件（`assh.yml`、`notes/`、`ai-sessions/`）会逐文件以 AES-256-GCM（10 万轮 SHA-256 派生）加密为 `encrypted/**/*.enc` 再推送；拉取时解密回原位置。SSH 密码仍只保存在本地 `secrets.json`（权限 600），**不参与同步**。
 
 ---
 
@@ -131,7 +131,7 @@ pnpm tauri build        # 打包（.deb / AppImage / dmg / exe）
 - **测试**：`测试连通性`，有密码时走 `sshpass`
 - **重新生成 config**：从 `assh.yml` 生成标准 `~/.ssh/config`（增删改主机后也会自动执行）
 - **从云端恢复**：只拉取远端 `assh.yml`，随后重建 config
-- **密码加密同步**（可选）：在设置中填写「同步口令」后，密码库会 AES-256-GCM 加密为 `secrets.enc.json` 随仓库推送。在另一台机器输入相同口令并拉取，密码自动恢复。本地已有的密码优先（强制恢复除外）。
+- **加密同步**（可选）：在设置中填写「加密主密码」。推送时 `assh.yml` / `notes/` / `ai-sessions/` 下每个文件都会单独加密为 `encrypted/**/*.enc`，明文被 gitignore 排除；拉取时解密回各自原位置。主密码不入库；SSH 密码（`secrets.json`）不参与同步。
 - **模板与通配**：直接编辑 `assh.yml` 使用 `inherit`、gateways、正则主机
 
 ### 内嵌终端
@@ -224,8 +224,8 @@ docs/images/         界面截图
 **Q：为什么 GitHub 主机不能开终端？**
 GitHub 的 SSH 端点（`git@ssh.github.com`）是 Git 服务，不分配 PTY。应用会自动识别 Git 服务主机（GitHub/GitLab/Bitbucket/Gitee/Codeberg/sr.ht）并禁用终端入口。
 
-**Q：密码会跨机器同步吗？**
-默认不同步；在设置中配置「同步口令」后才会。开启后密码库加密为 `secrets.enc.json` 随仓库同步。未配置口令时只同步主机定义，新机器需重新输入密码。
+**Q：SSH 密码会跨机器同步吗？**
+不会。SSH 密码只保存在本地 `secrets.json`，从不参与同步。主密码加密的是主机定义、笔记与 AI 会话等数据，密码库被有意排除。
 
 **Q：本地删除的文件，普通"拉取"为什么没恢复？**
 普通拉取是本地优先。需要远端覆盖本地时，用 **设置 → 从云端强制恢复**（`reset --hard`）或 **SSH → 从云端恢复**。

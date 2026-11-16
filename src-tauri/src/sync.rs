@@ -1,4 +1,5 @@
 use crate::core::{expand_tilde, home, run_cmd, run_cmd_dir, AppState};
+use rand::RngCore;
 use std::fs;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -305,64 +306,174 @@ pub struct SyncItemResult {
 
 /// 同步「SSH 配置 + 笔记」所在的数据仓库
 
-/// 推送前：把本地密码库加密写入仓库（需配置同步口令）
-fn encrypt_secrets_into_repo(st: &AppState, repo_dir: &Path, cfg: &crate::core::AppConfig) {
-    if cfg.password_sync_key.is_empty() {
-        return;
+// ==================== 全量加密同步 ====================
+// 加密模式下：assh.yml / notes / ai-sessions 逐文件加密到 encrypted/**/*.enc，
+// 明文不入库；拉取时解密回原位置。SSH 密码（secrets.json）不参与同步。
+
+const ENC_DIR: &str = "encrypted";
+const SALT_FILE: &str = ".enc_salt";
+
+/// 生成/读取仓库固定 salt（salt 明文无害，用于批量派生一次密钥）
+fn ensure_salt(repo: &Path) -> Result<Vec<u8>, String> {
+    let path = repo.join(SALT_FILE);
+    if path.exists() {
+        return fs::read(&path).map_err(|e| format!("读取 salt 失败: {}", e));
     }
-    let secrets = st.data_dir.join("secrets.json");
-    let Ok(raw) = fs::read_to_string(&secrets) else {
+    let mut salt = [0u8; 16];
+    rand::rngs::OsRng.fill_bytes(&mut salt);
+    fs::write(&path, salt).map_err(|e| format!("写入 salt 失败: {}", e))?;
+    Ok(salt.to_vec())
+}
+
+/// 递归收集明文文件（跳过 .git / encrypted / 加密产物）
+fn collect_plain(
+    dir: &Path,
+    base: &Path,
+    out: &mut Vec<(std::path::PathBuf, std::path::PathBuf)>,
+) {
+    let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
-    if raw.trim().len() <= 2 {
-        return; // 空密码库不生成
-    }
-    match crate::crypto::encrypt(&cfg.password_sync_key, &raw) {
-        Ok(enc) => {
-            let _ = fs::write(repo_dir.join("secrets.enc.json"), enc);
-            st.log("sync", "密码库已加密加入同步", "secrets.enc.json");
+    for e in entries.flatten() {
+        let p = e.path();
+        let name = e.file_name().to_string_lossy().to_string();
+        if name == ".git" || name == ENC_DIR || name.starts_with(".enc") || name == ".migrated" {
+            continue;
         }
-        Err(e) => st.log("error", "密码库加密失败", &e),
+        if p.is_dir() {
+            collect_plain(&p, base, out);
+        } else if p.is_file() {
+            if let Ok(rel) = p.strip_prefix(base) {
+                out.push((p.clone(), rel.to_path_buf()));
+            }
+        }
     }
 }
 
-/// 拉取后：本地密码库为空时，从仓库解密恢复
-fn decrypt_secrets_from_repo(st: &AppState, repo_dir: &Path, cfg: &crate::core::AppConfig) -> bool {
-    if cfg.password_sync_key.is_empty() {
-        return false;
-    }
-    let enc_path = repo_dir.join("secrets.enc.json");
-    if !enc_path.exists() {
-        return false;
-    }
-    let secrets_path = st.data_dir.join("secrets.json");
-    let local_empty = fs::read_to_string(&secrets_path)
-        .map(|s| s.trim().len() <= 2)
-        .unwrap_or(true);
-    if !local_empty {
-        return false; // 本地优先：已有密码不覆盖
-    }
-    let Ok(enc) = fs::read_to_string(&enc_path) else {
-        return false;
+/// 递归收集密文文件
+fn collect_enc(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
     };
-    match crate::crypto::decrypt(&cfg.password_sync_key, &enc) {
-        Ok(raw) => {
-            if fs::write(&secrets_path, &raw).is_ok() {
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    let _ = fs::set_permissions(&secrets_path, fs::Permissions::from_mode(0o600));
-                }
-                st.log("sync", "密码库已从云端恢复", "本地密码已解密写入");
-                return true;
-            }
-            false
-        }
-        Err(e) => {
-            st.log("error", "密码库解密失败", &e);
-            false
+    for e in entries.flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            collect_enc(&p, out);
+        } else if p.extension().and_then(|x| x.to_str()) == Some("enc") {
+            out.push(p);
         }
     }
+}
+
+/// 加密模式的 .gitignore：排除明文，只提交 encrypted/ 与 salt
+fn setup_gitignore(repo: &Path, encrypted: bool) -> Result<(), String> {
+    let path = repo.join(".gitignore");
+    let content = if encrypted {
+        "# 加密同步：明文不入库（内容见 encrypted/）\n/assh.yml\n/notes/\n/ai-sessions/\n/.migrated\n"
+    } else {
+        "# 明文同步\n*.sqlite-wal\n*.sqlite-shm\n"
+    };
+    fs::write(&path, content).map_err(|e| format!("写入 .gitignore 失败: {}", e))
+}
+
+/// 推送前：把全部明文逐文件加密到 encrypted/
+pub(crate) fn encrypt_all(st: &AppState, repo: &Path, passphrase: &str) -> Result<usize, String> {
+    setup_gitignore(repo, true)?;
+    // 把已跟踪的明文移出索引，避免继续提交明文
+    let _ = run_cmd_dir(
+        "git",
+        &[
+            "rm",
+            "--cached",
+            "-r",
+            "--quiet",
+            "--ignore-unmatch",
+            "assh.yml",
+            "notes",
+            "ai-sessions",
+        ],
+        repo,
+        &[],
+    );
+
+    let salt = ensure_salt(repo)?;
+    let key = crate::crypto::derive_batch_key(passphrase, &salt);
+    let enc_root = repo.join(ENC_DIR);
+
+    let mut items: Vec<(std::path::PathBuf, std::path::PathBuf)> = vec![];
+    for name in ["assh.yml", "notes", "ai-sessions"] {
+        let p = repo.join(name);
+        if p.is_file() {
+            items.push((p, std::path::PathBuf::from(name)));
+        } else if p.is_dir() {
+            collect_plain(&p, &repo, &mut items);
+        }
+    }
+
+    let mut count = 0usize;
+    for (src, rel) in items {
+        let dst = enc_root.join(format!("{}.enc", rel.display()));
+        if let Some(parent) = dst.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let Ok(plain) = fs::read(&src) else {
+            continue;
+        };
+        if let Ok(blob) = crate::crypto::encrypt_with_key(&key, &plain) {
+            if fs::write(&dst, blob).is_ok() {
+                count += 1;
+            }
+        }
+    }
+    st.log(
+        "sync",
+        "已加密同步内容",
+        &format!("{} 个文件 → encrypted/", count),
+    );
+    Ok(count)
+}
+
+/// 拉取后：把 encrypted/ 下全部密文解密回原位置
+pub(crate) fn decrypt_all(st: &AppState, repo: &Path, passphrase: &str) -> Result<usize, String> {
+    let salt_path = repo.join(SALT_FILE);
+    if !salt_path.exists() {
+        return Err("仓库缺少加密 salt：该仓库不是加密模式".into());
+    }
+    let salt = fs::read(&salt_path).map_err(|e| format!("读取 salt 失败: {}", e))?;
+    let key = crate::crypto::derive_batch_key(passphrase, &salt);
+    let enc_root = repo.join(ENC_DIR);
+    if !enc_root.exists() {
+        return Err("仓库中没有 encrypted/ 目录".into());
+    }
+
+    let mut files = vec![];
+    collect_enc(&enc_root, &mut files);
+    let mut count = 0usize;
+    for enc in files {
+        let Ok(rel) = enc.strip_prefix(&enc_root) else {
+            continue;
+        };
+        let rel_str = rel.to_string_lossy().trim_end_matches(".enc").to_string();
+        let target = repo.join(&rel_str);
+        let Ok(blob) = fs::read(&enc) else {
+            continue;
+        };
+        match crate::crypto::decrypt_with_key(&key, &blob) {
+            Ok(plain) => {
+                if let Some(parent) = target.parent() {
+                    let _ = fs::create_dir_all(parent);
+                }
+                if fs::write(&target, plain).is_ok() {
+                    count += 1;
+                }
+            }
+            Err(e) => {
+                st.log("error", "解密失败", &format!("{}: {}", rel_str, e));
+            }
+        }
+    }
+    st.log("sync", "已解密云端内容", &format!("{} 个文件", count));
+    Ok(count)
 }
 
 pub fn sync_data_repo(st: &AppState, action: &str) -> SyncItemResult {
@@ -386,9 +497,20 @@ pub fn sync_data_repo(st: &AppState, action: &str) -> SyncItemResult {
     }
 
     let push_like = action == "push";
+    // 加密模式：配置了主密码时，全部内容加密后入库
+    let encrypted_mode = !cfg.encrypt_password.is_empty();
     if push_like {
-        // 密码库加密后加入本次提交
-        encrypt_secrets_into_repo(st, &repo_dir, &cfg);
+        if encrypted_mode {
+            if let Err(e) = encrypt_all(st, &repo_dir, &cfg.encrypt_password) {
+                return SyncItemResult {
+                    name,
+                    ok: false,
+                    detail: format!("加密失败: {}", e),
+                };
+            }
+        } else {
+            let _ = setup_gitignore(&repo_dir, false);
+        }
         let add = run_cmd_dir("git", &["add", "-A"], &repo_dir, &[]);
         if !add.as_ref().map(|a| a.ok).unwrap_or(false) {
             return SyncItemResult {
@@ -432,8 +554,12 @@ pub fn sync_data_repo(st: &AppState, action: &str) -> SyncItemResult {
                 detail: "拉取失败或合并冲突，已中止（本地数据未改动）".into(),
             };
         }
-        // 拉取后尝试恢复加密密码库（本地为空时才生效）
-        decrypt_secrets_from_repo(st, &repo_dir, &cfg);
+        // 拉取后：加密模式下解密全部内容回原位置
+        if encrypted_mode {
+            if let Err(e) = decrypt_all(st, &repo_dir, &cfg.encrypt_password) {
+                st.log("error", "解密云端内容失败", &e);
+            }
+        }
     }
 
     if !push_like {
@@ -606,24 +732,9 @@ pub async fn force_restore(state: State<'_, AppState>) -> Result<String, String>
         if !reset.ok {
             return Err(format!("重置失败: {}", reset.combined()));
         }
-        // 强制恢复：密码库也以云端为准
-        let enc_path = repo.join("secrets.enc.json");
-        if enc_path.exists() && !cfg.password_sync_key.is_empty() {
-            if let Ok(enc) = fs::read_to_string(&enc_path) {
-                match crate::crypto::decrypt(&cfg.password_sync_key, &enc) {
-                    Ok(raw) => {
-                        let secrets = st.data_dir.join("secrets.json");
-                        let _ = fs::write(&secrets, raw);
-                        #[cfg(unix)]
-                        {
-                            use std::os::unix::fs::PermissionsExt;
-                            let _ = fs::set_permissions(&secrets, fs::Permissions::from_mode(0o600));
-                        }
-                        st.log("sync", "密码库已强制恢复", "");
-                    }
-                    Err(e) => st.log("error", "密码库解密失败", &e),
-                }
-            }
+        // 强制恢复：加密模式下解密全部内容
+        if !cfg.encrypt_password.is_empty() {
+            let _ = decrypt_all(&st, &repo, &cfg.encrypt_password);
         }
         // 重建 ~/.ssh/config，让恢复后的 assh.yml 立即生效
         let cfg_msg = crate::ssh::build_ssh_config_impl(&st)

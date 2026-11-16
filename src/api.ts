@@ -129,7 +129,7 @@ export interface AppConfig {
   ssh_dir: string;
   electerm_cmd: string;
   auto_sync_enabled: boolean;
-  password_sync_key: string;
+  encrypt_password: string;
 }
 
 export interface SshKeyInfo {
