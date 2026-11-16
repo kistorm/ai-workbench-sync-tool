@@ -272,7 +272,7 @@ pub async fn notes_git_sync(state: State<'_, AppState>, action: String) -> Resul
                     "git",
                     &["commit", "-qm", &format!("notes: {}", chrono::Local::now().format("%F %T"))],
                     &git_root,
-                    &[],
+                    &crate::core::git_identity_env(&git_root),
                 );
                 let pull = run_cmd_dir("git", &["pull", "-q", "--rebase", "--autostash", "-X", "ours"], &git_root, &[])?;
                 let push = run_cmd_dir("git", &["push", "-q"], &git_root, &[])?;

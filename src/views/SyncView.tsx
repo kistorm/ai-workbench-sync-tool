@@ -80,6 +80,16 @@ export function SyncView({ theme, onThemeChange, appName, onAppNameChange }: Syn
 
   async function saveConfig() {
     if (!cfg) return;
+    // Git 地址严格校验：仅允许 git@host:owner/repo.git
+    const gr = cfg.git_repo.trim();
+    if (gr && !/^git@[^\s:/]+\.[^\s:/]+:[^\s:/]+\/[^\s:/]+\.git$/.test(gr)) {
+      push(
+        "err",
+        "仓库地址格式不正确",
+        "仅支持 SSH 格式 git@host:用户名/仓库.git，例如 git@github.com:you/your-repo.git；不支持 http(s) 等其他格式。"
+      );
+      return;
+    }
     const oldPwd = cfgQ.data?.encrypt_password ?? "";
     const pwdChanged = oldPwd !== cfg.encrypt_password;
     const r = await run("save", () => api.saveSyncConfig(cfg));
@@ -282,8 +292,12 @@ export function SyncView({ theme, onThemeChange, appName, onAppNameChange }: Syn
                   <input
                     value={cfg.git_repo}
                     onChange={(e) => update("git_repo", e.target.value)}
+                    placeholder="git@github.com:you/your-repo.git"
                     className={inputCls}
                   />
+                  <p className="font-mono text-[10px] text-[var(--color-nexus-text-faint)] mt-1">
+                    仅支持 SSH 格式：git@host:用户名/仓库.git
+                  </p>
                 </div>
                 <div>
                   <label className="block font-mono text-[11px] text-[var(--color-nexus-text-dim)] mb-1.5">

@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 
 /// 用户主目录
@@ -292,6 +293,100 @@ pub fn run_cmd_dir(
     })
 }
 
+/// 在目录中执行命令，并把 stderr 的每一行（含 `\r` 刷新的进度行）回调出去。
+/// 用于解析 git 的 `Writing objects: 42%` / `Receiving objects: 42%` 进度。
+pub fn run_cmd_dir_stream(
+    program: &str,
+    args: &[&str],
+    cwd: &Path,
+    envs: &[(&str, String)],
+    mut on_line: impl FnMut(&str),
+) -> Result<CmdResult, String> {
+    let mut cmd = Command::new(program);
+    cmd.args(args);
+    cmd.current_dir(cwd);
+    for (k, v) in envs {
+        cmd.env(k, v);
+    }
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("执行 {} 失败: {}", program, e))?;
+
+    // stdout 在独立线程读取，避免管道写满导致子进程阻塞
+    let stdout_handle = child.stdout.take().map(|mut s| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = s.read_to_end(&mut buf);
+            buf
+        })
+    });
+
+    let mut err_out = String::new();
+    let mut line_buf = String::new();
+    if let Some(mut s) = child.stderr.take() {
+        let mut chunk = [0u8; 4096];
+        loop {
+            let n = s
+                .read(&mut chunk)
+                .map_err(|e| format!("读取 {} 输出失败: {}", program, e))?;
+            if n == 0 {
+                break;
+            }
+            let text = String::from_utf8_lossy(&chunk[..n]);
+            for ch in text.chars() {
+                if ch == '\r' || ch == '\n' {
+                    if !line_buf.is_empty() {
+                        on_line(&line_buf);
+                        err_out.push_str(&line_buf);
+                        err_out.push('\n');
+                        line_buf.clear();
+                    }
+                } else {
+                    line_buf.push(ch);
+                }
+            }
+        }
+    }
+    if !line_buf.is_empty() {
+        on_line(&line_buf);
+        err_out.push_str(&line_buf);
+        err_out.push('\n');
+    }
+
+    let status = child
+        .wait()
+        .map_err(|e| format!("等待 {} 结束失败: {}", program, e))?;
+    let stdout = stdout_handle
+        .and_then(|h| h.join().ok())
+        .map(|b| String::from_utf8_lossy(&b).to_string())
+        .unwrap_or_default();
+    Ok(CmdResult {
+        ok: status.success(),
+        code: status.code(),
+        stdout,
+        stderr: err_out,
+    })
+}
+
+/// 提交时使用的兜底身份：仅当该仓库读不到 user.email 时生效。
+/// 不修改用户的全局 git 配置，避免新机器首次提交直接失败。
+pub fn git_identity_env(dir: &Path) -> Vec<(&'static str, String)> {
+    let configured = run_cmd_dir("git", &["config", "user.email"], dir, &[])
+        .map(|r| r.ok && !r.stdout.trim().is_empty())
+        .unwrap_or(false);
+    if configured {
+        Vec::new()
+    } else {
+        vec![
+            ("GIT_AUTHOR_NAME", "NEXUS Workbench".to_string()),
+            ("GIT_AUTHOR_EMAIL", "nexus@localhost".to_string()),
+            ("GIT_COMMITTER_NAME", "NEXUS Workbench".to_string()),
+            ("GIT_COMMITTER_EMAIL", "nexus@localhost".to_string()),
+        ]
+    }
+}
+
 /// 递归统计指定扩展名的文件数
 pub fn count_files(dir: &Path, ext: &str) -> u64 {
     let mut n = 0u64;
@@ -389,6 +484,10 @@ pub fn get_sync_config(state: tauri::State<AppState>) -> AppConfig {
 
 #[tauri::command]
 pub fn save_sync_config(state: tauri::State<AppState>, config: AppConfig) -> Result<(), String> {
+    // Git 地址严格校验：只允许 git@host:owner/repo.git 格式
+    if !config.git_repo.trim().is_empty() {
+        crate::sync::validate_git_repo_url(&config.git_repo)?;
+    }
     *state.config.lock().unwrap() = config.clone();
     state.save_config(&config)?;
     // 立即把新仓库地址应用到本地仓库，避免"界面填了但推送还去旧仓库"

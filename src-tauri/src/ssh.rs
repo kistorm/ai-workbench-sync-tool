@@ -1,4 +1,4 @@
-use crate::core::{expand_tilde, run_cmd, safe_join, AppState, CmdResult};
+use crate::core::{expand_tilde, run_cmd, run_cmd_dir, safe_join, AppState, CmdResult};
 use serde::Serialize;
 use std::fs;
 use std::path::PathBuf;
@@ -52,6 +52,10 @@ fn shell_capable(user: &str, hostname: &str) -> bool {
 
 fn ssh_dir(state: &AppState) -> PathBuf {
     expand_tilde(&state.cfg().ssh_dir)
+}
+
+pub(crate) fn ssh_dir_of(state: &AppState) -> PathBuf {
+    ssh_dir(state)
 }
 
 fn assh_yml_path(state: &AppState) -> PathBuf {
@@ -720,7 +724,125 @@ pub fn clear_host_password(state: State<AppState>, alias: String) -> Result<(), 
     Ok(())
 }
 
+/// SSH 配置单独推送到仓库（加密 assh.yml + 主机密码库，不动笔记/AI 数据）
+#[tauri::command]
+pub async fn push_ssh_config(state: State<'_, AppState>) -> Result<String, String> {
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let repo = crate::sync::config_repo_dir();
+        let cfg = st.cfg();
+        if !repo.join(".git").exists() {
+            return Err(format!(
+                "{} 不是 git 仓库（请先在设置里初始化仓库）",
+                repo.display()
+            ));
+        }
+        let repo_str = repo.to_string_lossy().to_string();
+        crate::sync::apply_remote(&repo, &cfg.git_repo)?;
+
+        // 加密 SSH 相关内容；未设置主密码则退回明文模式（assh.yml 直接入库）
+        let encrypted_mode = !cfg.encrypt_password.is_empty();
+        let mut n = 0usize;
+        if encrypted_mode {
+            n = crate::sync::encrypt_ssh_only(&st, &repo, &cfg.encrypt_password)?;
+        } else {
+            crate::sync::setup_gitignore_plain(&repo)?;
+        }
+
+        // 只暂存 SSH 相关路径，不把笔记/AI 的本地变更带进这次提交
+        let paths: Vec<&str> = if encrypted_mode {
+            vec!["encrypted", ".enc_salt", ".gitignore"]
+        } else {
+            vec!["assh.yml", ".gitignore"]
+        };
+        for p in &paths {
+            let _ = run_cmd_dir("git", &["add", "-A", "--", p], &repo, &[]);
+        }
+        let commit = run_cmd_dir(
+            "git",
+            &[
+                "commit",
+                "-qm",
+                &format!(
+                    "ssh: sync config ({} files, {})",
+                    if encrypted_mode { n } else { 1 },
+                    chrono::Local::now().format("%F %T")
+                ),
+            ],
+            &repo,
+            &crate::core::git_identity_env(&repo),
+        );
+        let commit_note = match &commit {
+            Ok(r) if r.ok => "已提交".to_string(),
+            Ok(r) if r.combined().contains("nothing to commit") => "无变化".to_string(),
+            Ok(r) => return Err(format!("提交失败：{}", r.combined())),
+            Err(e) => return Err(format!("提交失败: {}", e)),
+            _ => unreachable!(),
+        };
+
+        let ssh_env = crate::sync::git_ssh_env(&st);
+        let branch = run_cmd("git", &["-C", &repo_str, "branch", "--show-current"], &[])?
+            .stdout
+            .trim()
+            .to_string();
+        let branch = if branch.is_empty() { "main".to_string() } else { branch };
+
+        // 远端有分支才拉取（首次推送跳过，否则报 couldn't find remote ref）
+        if crate::sync::remote_has_branch(&repo, &branch) {
+            let pull = run_cmd_dir(
+                "git",
+                &["pull", "-q", "--rebase", "--autostash", "-X", "ours"],
+                &repo,
+                &ssh_env,
+            )?;
+            if !pull.ok {
+                let _ = run_cmd_dir("git", &["rebase", "--abort"], &repo, &[]);
+                return Err(format!("拉取合并失败：{}", pull.combined()));
+            }
+        }
+
+        // 推送（失败自动重试 3 次）
+        let mut push_err = String::new();
+        for attempt in 1..=3usize {
+            let p = run_cmd_dir(
+                "git",
+                &["push", "-q", "-u", "origin", &branch],
+                &repo,
+                &ssh_env,
+            );
+            match p {
+                Ok(r) if r.ok => {
+                    st.log(
+                        "sync",
+                        "SSH 配置已推送到仓库",
+                        &format!("{} · {}", commit_note, branch),
+                    );
+                    return Ok(format!(
+                        "SSH 配置已推送到仓库{}（{} · {}）",
+                        if encrypted_mode {
+                            format!("，加密 {} 个文件", n)
+                        } else {
+                            String::new()
+                        },
+                        commit_note,
+                        branch
+                    ));
+                }
+                Ok(r) => push_err = r.combined(),
+                Err(e) => push_err = e,
+            }
+            if attempt < 3 {
+                std::thread::sleep(std::time::Duration::from_secs(3));
+            }
+        }
+        Err(format!("推送失败（已重试 3 次）：{}", push_err))
+    })
+    .await
+    .map_err(|e| format!("任务失败: {}", e))?
+}
+
 /// 单独从云端强制恢复 SSH 配置（只覆盖 assh.yml，不动笔记/AI 数据）
+/// 加密同步下云端没有明文 assh.yml，需要取回 encrypted/assh.yml.enc 并用主密码解密。
 #[tauri::command]
 pub async fn force_pull_ssh_config(state: State<'_, AppState>) -> Result<String, String> {
     let st = state.inner().clone();
@@ -730,42 +852,101 @@ pub async fn force_pull_ssh_config(state: State<'_, AppState>) -> Result<String,
         if !repo.join(".git").exists() {
             return Err(format!("{} 不是 git 仓库", repo.display()));
         }
+        let repo_str = repo.to_string_lossy().to_string();
 
         // 确保远程地址是配置里的私库
         crate::sync::apply_remote(&repo, &cfg.git_repo)?;
 
-        let fetch = run_cmd("git", &["-C", &repo.to_string_lossy(), "fetch", "-q", "origin"], &[])?;
-        if !fetch.ok {
-            return Err(format!("拉取远程失败: {}", fetch.combined()));
+        // 网络参数：统一 GIT_SSH_COMMAND（github 走 443），失败自动重试 3 次
+        let ssh_env = crate::sync::git_ssh_env(&st);
+        let mut fetch_err = String::new();
+        let mut fetch_ok = false;
+        for attempt in 1..=3usize {
+            let f = run_cmd(
+                "git",
+                &["-C", &repo_str, "fetch", "-q", "origin"],
+                &ssh_env,
+            );
+            match f {
+                Ok(r) if r.ok => {
+                    fetch_ok = true;
+                    break;
+                }
+                Ok(r) => fetch_err = r.combined(),
+                Err(e) => fetch_err = e,
+            }
+            if attempt < 3 {
+                std::thread::sleep(std::time::Duration::from_secs(3));
+            }
+        }
+        if !fetch_ok {
+            return Err(format!("拉取远程失败（已重试 3 次）：{}", fetch_err));
         }
 
         // 当前分支 → 远程分支
-        let branch = run_cmd("git", &["-C", &repo.to_string_lossy(), "branch", "--show-current"], &[])?
+        let branch = run_cmd("git", &["-C", &repo_str, "branch", "--show-current"], &[])?
             .stdout
             .trim()
             .to_string();
         let branch = if branch.is_empty() { "main".to_string() } else { branch };
         let target = format!("origin/{}", branch);
 
-        // 只把 assh.yml 恢复成远程版本（不影响其他文件）
-        let restore = run_cmd(
+        // 云端是否有明文 assh.yml（未加密的旧仓库）
+        let has_plain = run_cmd(
             "git",
-            &[
-                "-C",
-                &repo.to_string_lossy(),
-                "restore",
-                "--source",
-                &target,
-                "--worktree",
-                "assh.yml",
-            ],
+            &["-C", &repo_str, "cat-file", "-e", &format!("{}:assh.yml", target)],
             &[],
-        )?;
-        if !restore.ok {
-            return Err(format!(
-                "恢复 SSH 配置失败（远程可能没有 assh.yml）: {}",
-                restore.combined()
-            ));
+        )
+        .map(|r| r.ok)
+        .unwrap_or(false);
+
+        let mut note = String::new();
+        if has_plain {
+            // 旧格式：直接恢复明文
+            let restore = run_cmd(
+                "git",
+                &["-C", &repo_str, "restore", "--source", &target, "--worktree", "assh.yml"],
+                &[],
+            )?;
+            if !restore.ok {
+                return Err(format!("恢复 SSH 配置失败: {}", restore.combined()));
+            }
+        } else {
+            // 加密同步：恢复密文 → 用主密码解密 → 写回 assh.yml
+            let restore_enc = run_cmd(
+                "git",
+                &[
+                    "-C",
+                    &repo_str,
+                    "restore",
+                    "--source",
+                    &target,
+                    "--worktree",
+                    "encrypted/assh.yml.enc",
+                ],
+                &[],
+            )?;
+            if !restore_enc.ok {
+                return Err(
+                    "远程没有 SSH 配置（assh.yml 与 encrypted/assh.yml.enc 均不存在）".into(),
+                );
+            }
+            if cfg.encrypt_password.is_empty() {
+                return Err(
+                    "该仓库是加密同步，但设置里没有填写主密码；请先在设置里填好主密码再恢复".into(),
+                );
+            }
+            let blob = fs::read(repo.join("encrypted/assh.yml.enc"))
+                .map_err(|e| format!("读取密文失败: {}", e))?;
+            let salt = fs::read(repo.join(".enc_salt"))
+                .map_err(|_| "仓库缺少 .enc_salt（不是加密同步仓库）".to_string())?;
+            let key = crate::crypto::derive_batch_key(&cfg.encrypt_password, &salt);
+            let plain = crate::crypto::decrypt_with_key(&key, &blob).map_err(|_| {
+                "解密失败：主密码不正确。请在设置里填写加密推送时使用的主密码后重试".to_string()
+            })?;
+            fs::write(repo.join("assh.yml"), &plain)
+                .map_err(|e| format!("写入 assh.yml 失败: {}", e))?;
+            note = "（已解密）".to_string();
         }
 
         // 重建 ~/.ssh/config 使恢复的配置立即生效
@@ -773,9 +954,9 @@ pub async fn force_pull_ssh_config(state: State<'_, AppState>) -> Result<String,
         st.log(
             "sync",
             "已从云端恢复 SSH 配置",
-            &format!("来源 {} 的 assh.yml", target),
+            &format!("来源 {} 的 assh.yml{}", target, note),
         );
-        Ok(format!("已从云端恢复 SSH 配置（{}）\n{}", target, msg))
+        Ok(format!("已从云端恢复 SSH 配置{}（{}）\n{}", note, target, msg))
     })
     .await
     .map_err(|e| format!("任务失败: {}", e))?
@@ -979,11 +1160,7 @@ pub fn detect_electerm_inner(state: &AppState) -> ElectermInfo {
     for (path, source) in electerm_candidates(state) {
         let p = std::path::Path::new(&path);
         if is_exec(p) {
-            let version = run_cmd(&path, &["--version"], &[])
-                .ok()
-                .filter(|r| r.ok)
-                .map(|r| r.stdout.trim().to_string())
-                .unwrap_or_default();
+            let version = electerm_version(&path, source);
             return ElectermInfo {
                 found: true,
                 path,
@@ -997,6 +1174,86 @@ pub fn detect_electerm_inner(state: &AppState) -> ElectermInfo {
         path: String::new(),
         source: "none".into(),
         version: String::new(),
+    }
+}
+
+/// 只用「不启动程序」的方式取版本号。
+/// 修复的 Bug：Electerm 是 Electron GUI 应用，执行 `electerm --version` 不会打印版本退出，
+/// 而是直接把 GUI 拉起来——导致每次打开设置页（自动探测）都会触发一次 Electerm 启动。
+fn electerm_version(path: &str, source: &str) -> String {
+    #[cfg(target_os = "linux")]
+    {
+        // deb 安装：dpkg 查询版本，绝不启动程序
+        if let Ok(r) = run_cmd("dpkg-query", &["-W", "-f=${Version}", "electerm"], &[]) {
+            if r.ok {
+                let v = r.stdout.trim().to_string();
+                if !v.is_empty() {
+                    return v;
+                }
+            }
+        }
+        // snap 安装
+        if path.starts_with("/snap/") {
+            if let Ok(r) = run_cmd("snap", &["list", "electerm"], &[]) {
+                if r.ok {
+                    if let Some(v) = r
+                        .stdout
+                        .lines()
+                        .nth(1)
+                        .and_then(|l| l.split_whitespace().nth(1))
+                    {
+                        return v.to_string();
+                    }
+                }
+            }
+        }
+        let _ = source;
+        String::new()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // 从 Info.plist 读取，不启动程序
+        let _ = (path, source);
+        if let Ok(r) = run_cmd(
+            "defaults",
+            &[
+                "read",
+                "/Applications/Electerm.app/Contents/Info.plist",
+                "CFBundleShortVersionString",
+            ],
+            &[],
+        ) {
+            if r.ok {
+                let v = r.stdout.trim().to_string();
+                if !v.is_empty() {
+                    return v;
+                }
+            }
+        }
+        String::new()
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // 读 exe 的版本元数据，不启动程序
+        if let Ok(r) = run_cmd(
+            "powershell",
+            &[
+                "-NoProfile",
+                "-Command",
+                &format!("(Get-Item '{}').VersionInfo.ProductVersion", path),
+            ],
+            &[],
+        ) {
+            if r.ok {
+                return r.stdout.trim().to_string();
+            }
+        }
+        let _ = source;
+        String::new()
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    {
+        String::new()
     }
 }
 

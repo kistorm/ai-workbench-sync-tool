@@ -92,6 +92,7 @@ pub fn run() {
             ssh::open_electerm,
             ssh::detect_electerm,
             ssh::force_pull_ssh_config,
+            ssh::push_ssh_config,
             ssh::open_path,
             ssh::validate_alias,
             ssh::list_ssh_keys,

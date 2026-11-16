@@ -40,6 +40,7 @@ echo "[$(date -Is)] ===== auto sync start =====" >> "$LOG"
 if [ -d "{ssh_repo}/.git" ]; then
   (
     cd "{ssh_repo}" || exit 0
+    git config user.email >/dev/null 2>&1 || {{ export GIT_AUTHOR_NAME="NEXUS Workbench" GIT_AUTHOR_EMAIL="nexus@localhost" GIT_COMMITTER_NAME="NEXUS Workbench" GIT_COMMITTER_EMAIL="nexus@localhost"; }}
     git add -A
     git commit -qm "auto: $(date +%F_%T)" 2>/dev/null || true
     git pull -q --rebase --autostash -X ours 2>>"$LOG" || git rebase --abort 2>/dev/null || true
@@ -60,6 +61,7 @@ fi
 if [ -d "{notes_dir}/.git" ]; then
   (
     cd "{notes_dir}" || exit 0
+    git config user.email >/dev/null 2>&1 || {{ export GIT_AUTHOR_NAME="NEXUS Workbench" GIT_AUTHOR_EMAIL="nexus@localhost" GIT_COMMITTER_NAME="NEXUS Workbench" GIT_COMMITTER_EMAIL="nexus@localhost"; }}
     git add -A
     git commit -qm "auto notes: $(date +%F_%T)" 2>/dev/null || true
     git pull -q --rebase --autostash 2>>"$LOG" || git rebase --abort 2>/dev/null || true

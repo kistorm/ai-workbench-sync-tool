@@ -258,6 +258,7 @@ export const api = {
   initDataRepo: () => invoke<string>("init_data_repo"),
   forceRestore: () => invoke<string>("force_restore"),
   forcePullSshConfig: () => invoke<string>("force_pull_ssh_config"),
+  pushSshConfig: () => invoke<string>("push_ssh_config"),
   hasPassword: (alias: string) => invoke<boolean>("has_password", { alias }),
 
   // cron

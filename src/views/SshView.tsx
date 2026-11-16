@@ -144,6 +144,13 @@ export function SshView() {
     } else push("err", "恢复失败", r.error);
   }
 
+  async function doPushSsh() {
+    const r = await run("push-ssh", () => api.pushSshConfig());
+    if (r.ok) {
+      push("ok", "SSH 配置已推送到仓库", r.data);
+    } else push("err", "推送失败", r.error);
+  }
+
   async function savePassword() {
     if (!host) return;
     if (!pwdValue) {
@@ -178,6 +185,9 @@ export function SshView() {
           </p>
         </div>
         <div className="flex gap-2">
+          <button className="btn" disabled={!!busy} onClick={doPushSsh} title="把 assh.yml 和主机密码库加密推送到仓库（不影响笔记/AI 会话）">
+            {busy === "push-ssh" ? "推送中…" : "⇡ 推送到仓库"}
+          </button>
           <button
             className="btn"
             disabled={!!busy}
@@ -409,7 +419,7 @@ export function SshView() {
             </span>
           </label>
           <p className="font-mono text-[10px] text-[var(--color-nexus-text-faint)]">
-            提示：密码不在 git 中，恢复后本地已保存的密码仍会保留
+            提示：已设置主密码时，主机密码会加密同步（encrypted/secrets.json.enc），恢复后即可查看密码；SSH 私钥本体不参与同步
           </p>
         </div>
       </Modal>

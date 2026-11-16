@@ -15,12 +15,123 @@ pub struct Diagnosis {
 }
 
 /// 构造 GIT_SSH_COMMAND
+/// - 指定了密钥：只用该密钥（IdentitiesOnly）
+/// - 未指定密钥：交给系统 SSH 配置 / ssh-agent（首次引导时还没有保存密钥）
 fn ssh_command(key: &str) -> String {
-    let key_path = expand_tilde(key);
-    format!(
-        "ssh -i {} -o IdentitiesOnly=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new",
-        key_path.display()
-    )
+    let common = "-o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new";
+    let key = key.trim();
+    if key.is_empty() {
+        format!("ssh {}", common)
+    } else {
+        format!(
+            "ssh -i {} -o IdentitiesOnly=yes {}",
+            expand_tilde(key).display(),
+            common
+        )
+    }
+}
+
+/// 供引导等网络 git 操作统一使用：按配置的密钥构造 GIT_SSH_COMMAND 环境变量。
+/// github.com 强制覆盖为 ssh.github.com:443 —— 不依赖 ~/.ssh/config 或 assh.yml
+/// 里的映射条目（用户删除 github.com 主机后同步通道依然可用）。
+pub(crate) fn git_ssh_env(st: &AppState) -> Vec<(&'static str, String)> {
+    let cfg = st.cfg();
+    let repo_host = cfg
+        .git_repo
+        .split('@')
+        .nth(1)
+        .and_then(|s| s.split(':').next())
+        .unwrap_or("")
+        .to_string();
+    let mut val = ssh_command(&cfg.ssh_key);
+    if repo_host == "github.com" {
+        val.push_str(" -o HostName=ssh.github.com -o Port=443");
+    }
+    vec![("GIT_SSH_COMMAND", val)]
+}
+
+/// assh.yml 缺失时的最小引导配置：只包含 Git 同步所需的传输通道，不含用户主机数据。
+/// 场景：全新机器首次恢复，或本地 assh.yml 被清空——没有它，
+/// ~/.ssh/config（assh 生成）里的 ProxyCommand 会因 assh 读不到 yml 而失败，
+/// 恢复模式自身就无法联网拉取（鸡生蛋问题）。
+/// 恢复完成后，云端解密回来的完整 assh.yml 会覆盖这份引导文件。
+pub(crate) fn ensure_bootstrap_assh_yml(st: &AppState) -> Result<(), String> {
+    let dir = crate::ssh::ssh_dir_of(st);
+    let yml = dir.join("assh.yml");
+    if yml.exists() {
+        return Ok(());
+    }
+    let cfg = st.cfg();
+    // 从 git 仓库地址里取主机名（已通过 validate_git_repo_url 校验过格式）
+    let host = cfg
+        .git_repo
+        .split('@')
+        .nth(1)
+        .and_then(|s| s.split(':').next())
+        .unwrap_or("")
+        .to_string();
+    let content = if host == "github.com" {
+        // GitHub:SSH 走 ssh.github.com:443，规避 22 端口被干扰的网络环境
+        let idfile = cfg.ssh_key.trim();
+        let id = if idfile.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "    identityfile: {}\n    identitiesonly: yes\n",
+                idfile
+            )
+        };
+        format!(
+            "# 由 NEXUS Workbench 引导生成：仅含 git 同步传输通道，不含用户主机。\nhosts:\n  github.com:\n    hostname: ssh.github.com\n    user: git\n    port: 443\n{}",
+            id
+        )
+    } else {
+        "# 由 NEXUS Workbench 引导生成：仅含 git 同步传输通道，不含用户主机。\nhosts: {}\n"
+            .to_string()
+    };
+    fs::create_dir_all(&dir).map_err(|e| format!("创建 SSH 目录失败: {}", e))?;
+    fs::write(&yml, content).map_err(|e| format!("写入引导 assh.yml 失败: {}", e))
+}
+
+/// 严格校验 Git 仓库地址：只接受 git@主机:用户/仓库.git 的 SSH（git）格式。
+/// 拒绝 https://、http://、ssh://、git://、file:// 以及本地路径等一切其他格式。
+pub fn validate_git_repo_url(repo: &str) -> Result<(), String> {
+    let repo = repo.trim();
+    if repo.is_empty() {
+        return Err("Git 仓库地址不能为空".into());
+    }
+    let lower = repo.to_lowercase();
+    for scheme in ["https://", "http://", "ssh://", "git://", "file://"] {
+        if lower.starts_with(scheme) {
+            return Err(format!(
+                "不支持 {} 格式：请使用 git@ 开头的 SSH 格式，例如 git@github.com:you/your-repo.git",
+                scheme.trim_end_matches("//")
+            ));
+        }
+    }
+    if !lower.starts_with("git@") {
+        return Err("地址必须以 git@ 开头，例如 git@github.com:you/your-repo.git".into());
+    }
+    let rest = &repo[4..];
+    let Some(ci) = rest.find(':') else {
+        return Err("地址缺少冒号，应为 git@github.com:you/your-repo.git".into());
+    };
+    let host = &rest[..ci];
+    let path = &rest[ci + 1..];
+    if host.is_empty() || !host.contains('.') || host.contains('/') {
+        return Err("主机名无效，应为 git@github.com:you/your-repo.git".into());
+    }
+    if path.contains(':') || path.contains(char::is_whitespace) {
+        return Err("仓库路径中不能包含冒号或空白字符".into());
+    }
+    let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    if segments.len() < 2 {
+        return Err("路径应为 用户名/仓库.git 两段，例如 git@github.com:you/your-repo.git".into());
+    }
+    if !lower.ends_with(".git") {
+        return Err("仓库路径必须以 .git 结尾，例如 git@github.com:you/your-repo.git".into());
+    }
+    Ok(())
 }
 
 /// 诊断 git 远程连通性（核心逻辑，可测试）
@@ -28,6 +139,7 @@ pub fn diagnose_git_impl(repo: &str, key: &str) -> Result<Diagnosis, String> {
     if repo.trim().is_empty() {
         return Err("未配置 Git 仓库地址".into());
     }
+    validate_git_repo_url(repo)?;
     let env = [("GIT_SSH_COMMAND", ssh_command(key))];
     let start = Instant::now();
     let res = run_cmd("git", &["ls-remote", repo], &env);
@@ -82,6 +194,8 @@ pub async fn diagnose_git(
     let cfg = state.cfg();
     let repo = repo.filter(|s| !s.trim().is_empty()).unwrap_or(cfg.git_repo);
     let key = key.filter(|s| !s.trim().is_empty()).unwrap_or(cfg.ssh_key);
+    // assh.yml 缺失时生成引导配置，避免 ProxyCommand 断网导致检测误报
+    let _ = ensure_bootstrap_assh_yml(&state);
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let result = diagnose_git_impl(&repo, &key);
@@ -192,7 +306,7 @@ pub async fn git_sync(
                     "git",
                     &["commit", "-qm", &format!("auto sync: {}", chrono::Local::now().format("%F %T"))],
                     &target,
-                    &[],
+                    &crate::core::git_identity_env(&target),
                 )?;
                 log_buf.push_str(&commit.combined());
                 let pull = run_cmd_dir(
@@ -366,18 +480,91 @@ fn collect_enc(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
 }
 
 /// 加密模式的 .gitignore：排除明文，只提交 encrypted/ 与 salt
+/// 未启用加密时：明文同步模式的 gitignore（assh.yml 入库，密码库仍排除）
+pub(crate) fn setup_gitignore_plain(repo: &Path) -> Result<(), String> {
+    setup_gitignore(repo, false)
+}
+
 fn setup_gitignore(repo: &Path, encrypted: bool) -> Result<(), String> {
     let path = repo.join(".gitignore");
     let content = if encrypted {
-        "# 加密同步：明文不入库（内容见 encrypted/）\n/assh.yml\n/notes/\n/ai-sessions/\n/.migrated\n"
+        "# 加密同步：明文不入库（内容见 encrypted/）\n/assh.yml\n/notes/\n/ai-sessions/\n/.migrated\n/secrets.json\n"
     } else {
-        "# 明文同步\n*.sqlite-wal\n*.sqlite-shm\n"
+        "# 明文同步\n*.sqlite-wal\n*.sqlite-shm\n/secrets.json\n"
     };
     fs::write(&path, content).map_err(|e| format!("写入 .gitignore 失败: {}", e))
 }
 
 /// 推送前：把全部明文逐文件加密到 encrypted/
 pub(crate) fn encrypt_all(st: &AppState, repo: &Path, passphrase: &str) -> Result<usize, String> {
+    encrypt_all_with_progress(st, repo, passphrase, |_, _| {})
+}
+
+/// SSH 单独推送：只加密 assh.yml + 主机密码库（不动笔记/AI 会话）
+pub(crate) fn encrypt_ssh_only(
+    st: &AppState,
+    repo: &Path,
+    passphrase: &str,
+) -> Result<usize, String> {
+    setup_gitignore(repo, true)?;
+    let _ = run_cmd_dir(
+        "git",
+        &[
+            "rm",
+            "--cached",
+            "-r",
+            "--quiet",
+            "--ignore-unmatch",
+            "assh.yml",
+            "secrets.json",
+        ],
+        repo,
+        &[],
+    );
+    let salt = ensure_salt(repo)?;
+    let key = crate::crypto::derive_batch_key(passphrase, &salt);
+    let enc_root = repo.join(ENC_DIR);
+
+    let mut items: Vec<(std::path::PathBuf, std::path::PathBuf)> = vec![];
+    let yml = repo.join("assh.yml");
+    if yml.is_file() {
+        items.push((yml, std::path::PathBuf::from("assh.yml")));
+    }
+    let secrets = st.data_dir.join("secrets.json");
+    if secrets.is_file() {
+        items.push((secrets, std::path::PathBuf::from("secrets.json")));
+    }
+
+    let mut count = 0usize;
+    for (src, rel) in items {
+        let dst = enc_root.join(format!("{}.enc", rel.display()));
+        if let Some(parent) = dst.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let Ok(plain) = fs::read(&src) else {
+            continue;
+        };
+        if let Ok(blob) = crate::crypto::encrypt_with_key(&key, &plain) {
+            if fs::write(&dst, blob).is_ok() {
+                count += 1;
+            }
+        }
+    }
+    st.log(
+        "sync",
+        "SSH 配置已加密",
+        &format!("{} 个文件 → encrypted/", count),
+    );
+    Ok(count)
+}
+
+/// 同 encrypt_all，但每处理一个文件回调 (已完成, 总数)，用于界面进度条
+pub(crate) fn encrypt_all_with_progress(
+    st: &AppState,
+    repo: &Path,
+    passphrase: &str,
+    mut on_progress: impl FnMut(usize, usize),
+) -> Result<usize, String> {
     setup_gitignore(repo, true)?;
     // 把已跟踪的明文移出索引，避免继续提交明文
     let _ = run_cmd_dir(
@@ -409,21 +596,31 @@ pub(crate) fn encrypt_all(st: &AppState, repo: &Path, passphrase: &str) -> Resul
             collect_plain(&p, &repo, &mut items);
         }
     }
+    // 主机密码库：随仓库加密同步（恢复后可直接查看密码）。
+    // 源文件在 app 数据目录（不进仓库），密文落到 encrypted/secrets.json.enc
+    let secrets_src = st.data_dir.join("secrets.json");
+    if secrets_src.is_file() {
+        items.push((secrets_src, std::path::PathBuf::from("secrets.json")));
+    }
 
+    let total = items.len();
+    on_progress(0, total);
     let mut count = 0usize;
+    let mut done = 0usize;
     for (src, rel) in items {
         let dst = enc_root.join(format!("{}.enc", rel.display()));
         if let Some(parent) = dst.parent() {
             let _ = fs::create_dir_all(parent);
         }
-        let Ok(plain) = fs::read(&src) else {
-            continue;
-        };
-        if let Ok(blob) = crate::crypto::encrypt_with_key(&key, &plain) {
-            if fs::write(&dst, blob).is_ok() {
-                count += 1;
+        if let Ok(plain) = fs::read(&src) {
+            if let Ok(blob) = crate::crypto::encrypt_with_key(&key, &plain) {
+                if fs::write(&dst, blob).is_ok() {
+                    count += 1;
+                }
             }
         }
+        done += 1;
+        on_progress(done, total);
     }
     st.log(
         "sync",
@@ -435,6 +632,18 @@ pub(crate) fn encrypt_all(st: &AppState, repo: &Path, passphrase: &str) -> Resul
 
 /// 拉取后：把 encrypted/ 下全部密文解密回原位置
 pub(crate) fn decrypt_all(st: &AppState, repo: &Path, passphrase: &str) -> Result<usize, String> {
+    decrypt_all_with_progress(st, repo, passphrase, |_, _| {}).map(|(c, _)| c)
+}
+
+/// 同 decrypt_all，但每处理一个文件回调 (已完成, 总数)。
+/// 返回 (成功解密数, 总数)：主密码错误时每个文件都会失败（成功 0 个），
+/// 调用方据此区分「密码不对」和「真的没有内容」。
+pub(crate) fn decrypt_all_with_progress(
+    st: &AppState,
+    repo: &Path,
+    passphrase: &str,
+    mut on_progress: impl FnMut(usize, usize),
+) -> Result<(usize, usize), String> {
     let salt_path = repo.join(SALT_FILE);
     if !salt_path.exists() {
         return Err("仓库缺少加密 salt：该仓库不是加密模式".into());
@@ -448,13 +657,22 @@ pub(crate) fn decrypt_all(st: &AppState, repo: &Path, passphrase: &str) -> Resul
 
     let mut files = vec![];
     collect_enc(&enc_root, &mut files);
+    let total = files.len();
+    on_progress(0, total);
     let mut count = 0usize;
+    let mut done = 0usize;
     for enc in files {
         let Ok(rel) = enc.strip_prefix(&enc_root) else {
             continue;
         };
         let rel_str = rel.to_string_lossy().trim_end_matches(".enc").to_string();
-        let target = repo.join(&rel_str);
+        // 密码库解密回写到 app 数据目录（mode 600），绝不落进仓库工作区
+        let is_secrets = rel_str == "secrets.json";
+        let target = if is_secrets {
+            st.data_dir.join("secrets.json")
+        } else {
+            repo.join(&rel_str)
+        };
         let Ok(blob) = fs::read(&enc) else {
             continue;
         };
@@ -464,6 +682,14 @@ pub(crate) fn decrypt_all(st: &AppState, repo: &Path, passphrase: &str) -> Resul
                     let _ = fs::create_dir_all(parent);
                 }
                 if fs::write(&target, plain).is_ok() {
+                    if is_secrets {
+                        #[cfg(unix)]
+                        {
+                            use std::os::unix::fs::PermissionsExt;
+                            let _ =
+                                fs::set_permissions(&target, fs::Permissions::from_mode(0o600));
+                        }
+                    }
                     count += 1;
                 }
             }
@@ -471,9 +697,15 @@ pub(crate) fn decrypt_all(st: &AppState, repo: &Path, passphrase: &str) -> Resul
                 st.log("error", "解密失败", &format!("{}: {}", rel_str, e));
             }
         }
+        done += 1;
+        on_progress(done, total);
     }
-    st.log("sync", "已解密云端内容", &format!("{} 个文件", count));
-    Ok(count)
+    st.log(
+        "sync",
+        "已解密云端内容",
+        &format!("{}/{} 个文件", count, total),
+    );
+    Ok((count, total))
 }
 
 pub fn sync_data_repo(st: &AppState, action: &str) -> SyncItemResult {
@@ -532,7 +764,7 @@ pub fn sync_data_repo(st: &AppState, action: &str) -> SyncItemResult {
                 &format!("auto: {}", chrono::Local::now().format("%F %T")),
             ],
             &repo_dir,
-            &[],
+            &crate::core::git_identity_env(&repo_dir),
         );
     }
 

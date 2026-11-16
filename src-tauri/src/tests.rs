@@ -336,17 +336,40 @@ fn it_cron_install_update_remove() {
 }
 
 #[test]
-fn it_diagnose_git_local_repo() {
-    // 用本地 bare 仓库测试，不依赖网络
-    let (state, base) = test_state("diag");
+fn it_git_repo_url_strict_validation() {
+    use crate::sync::validate_git_repo_url;
+    // 合法：git@ SSH 格式
+    assert!(validate_git_repo_url("git@github.com:kistorm/m-data-sync.git").is_ok());
+    assert!(validate_git_repo_url("git@ssh.example.com:team/proj.git").is_ok());
+    assert!(validate_git_repo_url("  git@github.com:a/b.git  ").is_ok());
+    // 非法：其他协议
+    assert!(validate_git_repo_url("https://github.com/kistorm/m-data-sync.git").is_err());
+    assert!(validate_git_repo_url("http://github.com/kistorm/m-data-sync.git").is_err());
+    assert!(validate_git_repo_url("ssh://git@github.com/kistorm/m-data-sync.git").is_err());
+    assert!(validate_git_repo_url("git://github.com/kistorm/m-data-sync.git").is_err());
+    assert!(validate_git_repo_url("file:///tmp/repo.git").is_err());
+    // 非法：本地路径 / 缺少组成部分
+    assert!(validate_git_repo_url("/tmp/nexus-e2e/remote3.git").is_err());
+    assert!(validate_git_repo_url("~/some/repo.git").is_err());
+    assert!(validate_git_repo_url("github.com:kistorm/m-data-sync.git").is_err());
+    assert!(validate_git_repo_url("git@github.com/kistorm/m-data-sync.git").is_err());
+    assert!(validate_git_repo_url("git@localhost:repo.git").is_err());
+    assert!(validate_git_repo_url("git@github.com:kistorm/m-data-sync").is_err());
+    assert!(validate_git_repo_url("git@github.com:single.git").is_err());
+    assert!(validate_git_repo_url("").is_err());
+}
+
+#[test]
+fn it_diagnose_git_rejects_non_git_url() {
+    // 严格格式：非 git@ 格式的地址应直接拒绝，不做网络请求
+    let (state, base) = test_state("diag-reject");
     let _ = &state;
     let repo_dir = base.join("remote.git");
     fs::create_dir_all(&repo_dir).unwrap();
     crate::core::run_cmd("git", &["init", "--bare", repo_dir.to_str().unwrap()], &[]).unwrap();
     let url = format!("file://{}", repo_dir.display());
-    let d = diagnose_git_impl(&url, "~/.ssh/id_ed25519_github").expect("诊断应返回结果");
-    assert!(d.ok, "本地裸仓库应可访问: {}", d.message);
-    assert!(d.latency_ms < 60_000);
+    let e = diagnose_git_impl(&url, "~/.ssh/id_ed25519_github").expect_err("file:// 应被拒绝");
+    assert!(e.contains("不支持") || e.contains("git@"), "unexpected: {}", e);
     let _ = fs::remove_dir_all(&base);
 }
 
@@ -643,6 +666,60 @@ fn it_encrypt_decrypt_all_content() {
     // decrypt_all 对每个文件失败只记录，不 panic；返回计数为 0
     assert!(matches!(res, Ok(0) | Err(_)));
     assert!(!repo.join("assh.yml").exists(), "错误密码不应写出明文");
+
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
+fn it_secrets_sync_roundtrip() {
+    let base = std::env::temp_dir().join(format!("nexus-sec-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    let repo = base.join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    fs::write(repo.join("assh.yml"), "hosts:\n  a:\n    hostname: 1.1.1.1\n").unwrap();
+
+    let state = AppState::init(base.join("data"));
+    // 录入两台主机密码
+    crate::core::save_password(&state, "web-1", "p@ss-1").unwrap();
+    crate::core::save_password(&state, "db-1", "中文密码2").unwrap();
+
+    crate::core::run_cmd("git", &["init", "-q", repo.to_str().unwrap()], &[]).unwrap();
+    let n = crate::sync::encrypt_all(&state, &repo, "sync-pass").unwrap();
+    assert_eq!(n, 2, "assh.yml + secrets.json 应加密 2 个文件");
+    assert!(repo.join("encrypted/secrets.json.enc").exists());
+
+    // 模拟新机器：清空本地密码库与明文
+    let secrets_path = base.join("data").join("secrets.json");
+    fs::remove_file(&secrets_path).unwrap();
+    fs::remove_file(repo.join("assh.yml")).unwrap();
+
+    let (dec, total) =
+        crate::sync::decrypt_all_with_progress(&state, &repo, "sync-pass", |_, _| {}).unwrap();
+    assert_eq!(total, 2);
+    assert_eq!(dec, 2);
+    // 密码恢复可查
+    assert_eq!(
+        crate::core::get_password(&state, "web-1").as_deref(),
+        Some("p@ss-1")
+    );
+    assert_eq!(
+        crate::core::get_password(&state, "db-1").as_deref(),
+        Some("中文密码2")
+    );
+    // 回写位置在 app 数据目录且权限 600，绝不落进仓库工作区
+    assert!(!repo.join("secrets.json").exists(), "明文密码库不应出现在仓库内");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = fs::metadata(&secrets_path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "恢复的密码库应保持 600 权限");
+    }
+
+    // 错误密码：全部失败（前端据此提示主密码不正确）
+    fs::remove_file(&secrets_path).unwrap();
+    let r =
+        crate::sync::decrypt_all_with_progress(&state, &repo, "wrong-pass", |_, _| {}).unwrap();
+    assert_eq!(r, (0, 2), "错误密码应 0 个文件解密成功");
 
     let _ = fs::remove_dir_all(&base);
 }
