@@ -304,6 +304,67 @@ pub struct SyncItemResult {
 }
 
 /// 同步「SSH 配置 + 笔记」所在的数据仓库
+
+/// 推送前：把本地密码库加密写入仓库（需配置同步口令）
+fn encrypt_secrets_into_repo(st: &AppState, repo_dir: &Path, cfg: &crate::core::AppConfig) {
+    if cfg.password_sync_key.is_empty() {
+        return;
+    }
+    let secrets = st.data_dir.join("secrets.json");
+    let Ok(raw) = fs::read_to_string(&secrets) else {
+        return;
+    };
+    if raw.trim().len() <= 2 {
+        return; // 空密码库不生成
+    }
+    match crate::crypto::encrypt(&cfg.password_sync_key, &raw) {
+        Ok(enc) => {
+            let _ = fs::write(repo_dir.join("secrets.enc.json"), enc);
+            st.log("sync", "密码库已加密加入同步", "secrets.enc.json");
+        }
+        Err(e) => st.log("error", "密码库加密失败", &e),
+    }
+}
+
+/// 拉取后：本地密码库为空时，从仓库解密恢复
+fn decrypt_secrets_from_repo(st: &AppState, repo_dir: &Path, cfg: &crate::core::AppConfig) -> bool {
+    if cfg.password_sync_key.is_empty() {
+        return false;
+    }
+    let enc_path = repo_dir.join("secrets.enc.json");
+    if !enc_path.exists() {
+        return false;
+    }
+    let secrets_path = st.data_dir.join("secrets.json");
+    let local_empty = fs::read_to_string(&secrets_path)
+        .map(|s| s.trim().len() <= 2)
+        .unwrap_or(true);
+    if !local_empty {
+        return false; // 本地优先：已有密码不覆盖
+    }
+    let Ok(enc) = fs::read_to_string(&enc_path) else {
+        return false;
+    };
+    match crate::crypto::decrypt(&cfg.password_sync_key, &enc) {
+        Ok(raw) => {
+            if fs::write(&secrets_path, &raw).is_ok() {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = fs::set_permissions(&secrets_path, fs::Permissions::from_mode(0o600));
+                }
+                st.log("sync", "密码库已从云端恢复", "本地密码已解密写入");
+                return true;
+            }
+            false
+        }
+        Err(e) => {
+            st.log("error", "密码库解密失败", &e);
+            false
+        }
+    }
+}
+
 pub fn sync_data_repo(st: &AppState, action: &str) -> SyncItemResult {
     let name = "SSH 配置 + 笔记".to_string();
     let repo_dir = config_repo_dir();
@@ -326,6 +387,8 @@ pub fn sync_data_repo(st: &AppState, action: &str) -> SyncItemResult {
 
     let push_like = action == "push";
     if push_like {
+        // 密码库加密后加入本次提交
+        encrypt_secrets_into_repo(st, &repo_dir, &cfg);
         let add = run_cmd_dir("git", &["add", "-A"], &repo_dir, &[]);
         if !add.as_ref().map(|a| a.ok).unwrap_or(false) {
             return SyncItemResult {
@@ -369,6 +432,8 @@ pub fn sync_data_repo(st: &AppState, action: &str) -> SyncItemResult {
                 detail: "拉取失败或合并冲突，已中止（本地数据未改动）".into(),
             };
         }
+        // 拉取后尝试恢复加密密码库（本地为空时才生效）
+        decrypt_secrets_from_repo(st, &repo_dir, &cfg);
     }
 
     if !push_like {
@@ -540,6 +605,25 @@ pub async fn force_restore(state: State<'_, AppState>) -> Result<String, String>
         let reset = run_cmd_dir("git", &["reset", "--hard", &target], &repo, &[])?;
         if !reset.ok {
             return Err(format!("重置失败: {}", reset.combined()));
+        }
+        // 强制恢复：密码库也以云端为准
+        let enc_path = repo.join("secrets.enc.json");
+        if enc_path.exists() && !cfg.password_sync_key.is_empty() {
+            if let Ok(enc) = fs::read_to_string(&enc_path) {
+                match crate::crypto::decrypt(&cfg.password_sync_key, &enc) {
+                    Ok(raw) => {
+                        let secrets = st.data_dir.join("secrets.json");
+                        let _ = fs::write(&secrets, raw);
+                        #[cfg(unix)]
+                        {
+                            use std::os::unix::fs::PermissionsExt;
+                            let _ = fs::set_permissions(&secrets, fs::Permissions::from_mode(0o600));
+                        }
+                        st.log("sync", "密码库已强制恢复", "");
+                    }
+                    Err(e) => st.log("error", "密码库解密失败", &e),
+                }
+            }
         }
         // 重建 ~/.ssh/config，让恢复后的 assh.yml 立即生效
         let cfg_msg = crate::ssh::build_ssh_config_impl(&st)

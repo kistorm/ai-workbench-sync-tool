@@ -20,7 +20,7 @@ Developers juggle too many scattered tools: SSH configs, AI IDE chat histories, 
 
 | Module | What it does |
 |---|---|
-| **SSH Management** | Manage hosts in `assh.yml` (aliases, jump hosts, templates, wildcards); auto-generates standard `~/.ssh/config`; test connectivity; edit host info; per-host password vault (local only) |
+| **SSH Management** | Manage hosts in `assh.yml` (aliases, jump hosts, templates, wildcards); auto-generates standard `~/.ssh/config`; test connectivity; edit host info; per-host password vault with **optional encrypted sync** |
 | **Built-in Terminal** | Multi-tab xterm.js terminal backed by a real PTY; auto-login with saved passwords; sessions survive page switching |
 | **Electerm Integration** | Open any host in Electerm with credentials passed via CLI; auto-detects the binary; download hints if missing |
 | **AI Session Sync** | Syncs ZCode, Claude Code, Cursor, Trae, and DeepSeek Harness (dsh) session data into the unified repo |
@@ -88,7 +88,7 @@ Local Markdown notes with a Markdown / rich-text dual editor.
 | Force restore (settings) | `reset --hard origin/main` — remote overwrites everything |
 | SSH-only force pull | Restore only `assh.yml`, leave notes/AI untouched |
 
-> Passwords are **never** synced. They live in a local `secrets.json` (mode 600) and are only used for terminal/Electerm auto-login.
+> **Password sync is opt-in and encrypted.** Passwords live in a local `secrets.json` (mode 600). When a "sync passphrase" is configured in Settings, the vault is encrypted (AES-256-GCM, 100k-round SHA-256 KDF) into `secrets.enc.json` and synced with the repo. The passphrase itself never leaves your machine.
 
 ---
 
@@ -131,6 +131,7 @@ pnpm tauri build        # production bundle (.deb / AppImage / dmg / exe)
 - **Test**: `Test connectivity` — uses `sshpass` when a password exists
 - **Regenerate config**: writes standard `~/.ssh/config` from `assh.yml` (also runs automatically after add/edit/delete)
 - **Restore from cloud**: pull only `assh.yml` from the remote, then rebuild config
+- **Password encrypted sync** (optional): set a sync passphrase in Settings → your password vault is AES-256-GCM encrypted into `secrets.enc.json` and pushed with the repo. On another machine, enter the same passphrase and pull — passwords are restored automatically. Local passwords always win over remote ones (except during force restore).
 - **Templates & wildcards**: edit `assh.yml` directly for `inherit`, gateways, and regex hosts
 
 ### Built-in Terminal
@@ -224,7 +225,7 @@ docs/images/         Screenshots
 GitHub's SSH endpoint (`git@ssh.github.com`) is a Git service — it does not allocate a PTY. The app detects Git-service hosts (GitHub/GitLab/Bitbucket/Gitee/Codeberg/sr.ht) and disables terminal entry points.
 
 **Q: Do passwords sync across machines?**
-No — by design. Only host definitions sync. On a new machine, re-enter passwords once.
+Only if you enable it. Set a sync passphrase in Settings and the password vault is encrypted (AES-256-GCM) and synced as `secrets.enc.json`. Without a passphrase, only host definitions sync; re-enter passwords on new machines.
 
 **Q: "Pull" didn't restore a file I deleted locally.**
 Regular pull is local-preferred. Use **Settings → Force restore** (`reset --hard`) or **SSH → Restore from cloud** for a remote-overwrites-local restore.

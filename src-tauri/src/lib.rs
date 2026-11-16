@@ -1,5 +1,6 @@
 mod ai;
 mod core;
+mod crypto;
 mod cron;
 mod notes;
 mod ssh;

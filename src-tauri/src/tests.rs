@@ -451,9 +451,12 @@ fn it_add_host_with_password_saves_secret() {
         let mode = fs::metadata(&secrets).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600, "secrets.json 权限应为 600");
     }
-    // 删除主机会清理密码
+    // 删除主机后密码保留（主机可从云端恢复，密码继续可用）
     crate::ssh::delete_host_impl(&state, "p1").unwrap();
-    assert!(crate::core::get_password(&state, "p1").is_none());
+    assert!(
+        crate::core::get_password(&state, "p1").is_some(),
+        "删除主机不应清理本地密码"
+    );
 }
 
 #[test]

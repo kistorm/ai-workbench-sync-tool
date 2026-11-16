@@ -791,6 +791,15 @@ pub async fn test_host(state: State<'_, AppState>, alias: String) -> Result<Test
     tauri::async_runtime::spawn_blocking(move || {
         let start = Instant::now();
         let password = crate::core::get_password(&st, &alias2);
+        // 用于生成更准确的失败提示
+        let host_meta = load_hosts(&st)
+            .ok()
+            .and_then(|hs| hs.into_iter().find(|h| h.alias == alias2));
+        let has_key = host_meta
+            .as_ref()
+            .map(|h| h.key_file.is_some())
+            .unwrap_or(false);
+        let has_pw = password.is_some();
         // `true` 比 `exit` 兼容性更好（部分 SSH 服务不允许 exit）
         // 首次连接自动接受 host key（信任主机），避免测试被指纹确认卡住
         let res: CmdResult = if let Some(pw) = password {
@@ -843,13 +852,18 @@ pub async fn test_host(state: State<'_, AppState>, alias: String) -> Result<Test
             || lower.contains("invalid command");
 
         let message = if res.code == Some(5) {
-            "密码认证失败（检查密码或服务器是否允许密码登录）".to_string()
+            "密码认证失败（密码错误或服务器不允许密码登录）".to_string()
         } else if lower.contains("successfully authenticated") {
             "连接成功 · 认证通过".to_string()
         } else if network_ok {
             format!("连接成功 · 远程命令退出码 {}", code)
         } else if lower.contains("permission denied") {
-            "网络可达 · 密钥/认证被拒绝".to_string()
+            // 区分"没有凭据"和"凭据错误"，给出可操作提示
+            match (has_pw, has_key) {
+                (false, false) => "网络可达 · 未保存密码（请点「查看 / 修改密码」设置密码）".to_string(),
+                (false, true) => "网络可达 · 密钥被拒绝（检查公钥是否已添加到服务器）".to_string(),
+                (true, _) => "网络可达 · 密码被拒绝（密码可能已变更，请重新设置）".to_string(),
+            }
         } else if lower.contains("timed out") || lower.contains("timeout") {
             "连接超时".to_string()
         } else if lower.contains("connection refused") {

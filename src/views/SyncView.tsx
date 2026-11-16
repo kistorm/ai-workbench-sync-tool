@@ -32,6 +32,7 @@ export function SyncView({ theme, onThemeChange, appName, onAppNameChange }: Syn
   const [electermInfo, setElectermInfo] = useState<ElectermInfo | null>(null);
   const [restoreOpen, setRestoreOpen] = useState(false);
   const [restoreConfirm, setRestoreConfirm] = useState(false);
+  const [syncKeyVisible, setSyncKeyVisible] = useState(false);
 
   useEffect(() => {
     if (cfgQ.data) {
@@ -289,6 +290,27 @@ export function SyncView({ theme, onThemeChange, appName, onAppNameChange }: Syn
                       读取系统
                     </button>
                   </div>
+                </div>
+                <div>
+                  <label className="block font-mono text-[11px] text-[var(--color-nexus-text-dim)] mb-1.5">
+                    同步口令（可选 · 用于加密同步 SSH 密码）
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type={syncKeyVisible ? "text" : "password"}
+                      value={cfg.password_sync_key}
+                      onChange={(e) => update("password_sync_key", e.target.value)}
+                      placeholder="留空则不同步密码"
+                      className={`${inputCls} flex-1`}
+                    />
+                    <button className="btn shrink-0" onClick={() => setSyncKeyVisible(!syncKeyVisible)}>
+                      {syncKeyVisible ? "隐藏" : "显示"}
+                    </button>
+                  </div>
+                  <p className="font-mono text-[10px] text-[var(--color-nexus-text-faint)] mt-1.5">
+                    设置后，本地密码库会加密为 <span className="text-[var(--color-neon-cyan)]">secrets.enc.json</span>
+                    随仓库同步；换机器时输入相同口令即可恢复密码。口令本身不入库。
+                  </p>
                 </div>
                 <div className="flex justify-end">
                   <button className="btn" disabled={!!busy} onClick={saveConfig}>

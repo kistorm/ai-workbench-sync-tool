@@ -56,6 +56,8 @@ pub struct AppConfig {
     pub ssh_dir: String,
     pub electerm_cmd: String,
     pub auto_sync_enabled: bool,
+    /// 同步口令：非空时，本地密码库会加密后随仓库同步
+    pub password_sync_key: String,
 }
 
 impl Default for AppConfig {
@@ -70,6 +72,7 @@ impl Default for AppConfig {
             ssh_dir: "~/.ssh".into(),
             electerm_cmd: "electerm".into(),
             auto_sync_enabled: true,
+            password_sync_key: String::new(),
         }
     }
 }
