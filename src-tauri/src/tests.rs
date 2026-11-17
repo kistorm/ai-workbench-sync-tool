@@ -723,3 +723,17 @@ fn it_secrets_sync_roundtrip() {
 
     let _ = fs::remove_dir_all(&base);
 }
+
+#[test]
+fn it_extract_changelog_section() {
+    use crate::core::extract_changelog_section;
+    let text = "# 更新日志\n\n## v0.2.0 (2026-11-18)\n\n### 新增\n- 功能A\n- 功能B\n\n## v0.1.0\n\n- 初始版本\n";
+    let sec = extract_changelog_section(text, "0.2.0").expect("应提取到 v0.2.0 段落");
+    assert!(sec.starts_with("## v0.2.0"));
+    assert!(sec.contains("功能A") && sec.contains("功能B"));
+    assert!(!sec.contains("初始版本"), "不应包含其他版本内容");
+    // 无对应版本 → None
+    assert!(extract_changelog_section(text, "9.9.9").is_none());
+    // 空段落（标题后无内容）→ None
+    assert!(extract_changelog_section("## v1.0.0\n\n## v0.9.0\n- x\n", "1.0.0").is_none());
+}

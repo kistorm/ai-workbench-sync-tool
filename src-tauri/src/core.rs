@@ -666,7 +666,7 @@ const APP_REPO_SLUG: &str = "kistorm/ai-workbench-sync-tool";
 const APP_REPO_URL: &str = "git@github.com:kistorm/ai-workbench-sync-tool.git";
 
 /// 从 CHANGELOG.md 文本里提取指定版本（"## v1.2.3"）到下一个 "## " 的段落
-fn extract_changelog_section(text: &str, version: &str) -> Option<String> {
+pub(crate) fn extract_changelog_section(text: &str, version: &str) -> Option<String> {
     let header = format!("## v{}", version);
     let mut out = String::new();
     let mut in_section = false;
