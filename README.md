@@ -65,7 +65,7 @@ Local Markdown notes with a Markdown / rich-text dual editor.
 │  Frontend (React 19 + Tailwind v4 + xterm.js)           │
 │    Dashboard · SSH · AI Sync · Notes · Settings         │
 │                                                         │
-│  Rust backend (53 commands)                             │
+│  Rust backend (50+ commands)                            │
 │    │                                                    │
 │    ├── assh  ────►  ~/.ssh/assh.yml  ──►  ~/.ssh/config │
 │    ├── PTY (portable-pty) ──► system ssh ──► terminal   │
@@ -219,6 +219,18 @@ Launching the app for the first time opens the onboarding screen:
 - **In-app timer** runs when crontab is not installed
 - **Sync log**: view the tail of the background sync log
 
+### System & Update (Settings page)
+
+- **System info**: the Settings page gains a "System & Update" block showing the OS type, OS version, current login account, and app version
+- **Check update**: click `Check update` to compare the version tags in the repo (e.g. `v0.2.0`) against the current version via `git ls-remote --tags`; when a newer version exists, a `⇣ Download vX` button appears and opens the GitHub Releases page to download the installer for your platform. No token required (private repos use the local SSH key)
+- **Network accelerator recommendation**: a new "Network accelerator" block recommends the xx-yun (xx-yun.com) proxy/acceleration service — click it to open the promo link; GitHub access is more stable from mainland-China networks
+
+### Packages & Release
+
+- Pushing a `v*` tag (e.g. `v0.2.0`) makes GitHub Actions build and publish a Release on Windows / macOS / Ubuntu automatically
+- Artifacts: Windows `.msi` / `.exe`, macOS `.dmg` / `.app`, Ubuntu `.deb` / `.AppImage`, plus Source code (zip / tar.gz) archives
+- Upgrade path: Settings → `Check update` → `⇣ Download vX` → install over the existing app
+
 ### Themes & Name
 
 - 5 themes: Neon, Forest, Ocean, Mono, Light-Green
@@ -304,6 +316,9 @@ Electerm is single-instance; the app activates its window automatically (Linux r
 
 **Q: Youdao Note integration?**
 Official OpenAPI is closed to new applicants. This app uses Cookie-based pull (pull-only, no writes back).
+
+**Q: Does “Check update” work with a private repo?**
+Yes. The check reads the repo's tags with your local SSH key (`git ls-remote --tags`) — there is no need to make the repo public; when downloading installers, just make sure the browser is logged in to GitHub so the private Release is accessible.
 
 ## License
 

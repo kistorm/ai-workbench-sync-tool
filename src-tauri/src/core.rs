@@ -533,3 +533,226 @@ pub fn app_info(state: tauri::State<AppState>) -> serde_json::Value {
         "arch": std::env::consts::ARCH,
     })
 }
+
+// ==================== 系统与升级 ====================
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SystemInfo {
+    pub os_type: String,     // "Linux" / "macOS" / "Windows"
+    pub os_version: String,  // 如 "Ubuntu 24.04.1 LTS"
+    pub username: String,    // 当前登录账户
+    pub app_version: String, // 应用版本
+}
+
+/// 平台版本描述：Linux 读 /etc/os-release 的 PRETTY_NAME，macOS 用 sw_vers，Windows 用 ver
+#[cfg(target_os = "linux")]
+fn os_version() -> String {
+    if let Ok(s) = fs::read_to_string("/etc/os-release") {
+        for line in s.lines() {
+            if let Some(v) = line.strip_prefix("PRETTY_NAME=") {
+                return v.trim_matches('"').to_string();
+            }
+        }
+    }
+    "Linux".into()
+}
+
+#[cfg(target_os = "macos")]
+fn os_version() -> String {
+    match run_cmd("sw_vers", &["-productVersion"], &[]) {
+        Ok(r) if r.ok && !r.stdout.trim().is_empty() => r.stdout.trim().to_string(),
+        _ => "macOS".into(),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn os_version() -> String {
+    match run_cmd("cmd", &["/C", "ver"], &[]) {
+        Ok(r) if r.ok && !r.stdout.trim().is_empty() => r.stdout.trim().to_string(),
+        _ => "Windows".into(),
+    }
+}
+
+/// 当前登录账户：Linux/macOS 取 USER（回退 LOGNAME），Windows 取 USERNAME
+#[cfg(not(target_os = "windows"))]
+fn current_username() -> String {
+    std::env::var("USER")
+        .or_else(|_| std::env::var("LOGNAME"))
+        .unwrap_or_else(|_| "unknown".into())
+}
+
+#[cfg(target_os = "windows")]
+fn current_username() -> String {
+    std::env::var("USERNAME").unwrap_or_else(|_| "unknown".into())
+}
+
+/// 汇总系统与应用信息，供设置页展示
+#[tauri::command]
+pub fn system_info() -> SystemInfo {
+    let os_type = match std::env::consts::OS {
+        "linux" => "Linux",
+        "macos" => "macOS",
+        "windows" => "Windows",
+        _ => std::env::consts::OS,
+    };
+    SystemInfo {
+        os_type: os_type.to_string(),
+        os_version: os_version(),
+        username: current_username(),
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UpdateInfo {
+    pub current: String,        // 当前版本
+    pub latest: Option<String>, // 远端最新 tag 版本（无则 None）
+    pub has_update: bool,
+    pub release_url: String, // 最新 release 页面
+    pub message: String,     // 给用户看的中文结果说明
+}
+
+/// 从 git@host:owner/repo.git 解析出 owner/repo，格式不符返回 None
+fn parse_repo_slug(url: &str) -> Option<String> {
+    let path = url.trim().split(':').nth(1)?;
+    let mut segs = path.split('/');
+    let owner = segs.next()?.trim();
+    let repo = segs.next()?.trim();
+    if owner.is_empty() || repo.is_empty() {
+        return None;
+    }
+    let repo = repo.strip_suffix(".git").unwrap_or(repo);
+    if repo.is_empty() {
+        return None;
+    }
+    Some(format!("{}/{}", owner, repo))
+}
+
+/// 版本号解析成 (major, minor, patch)：不足三段补 0，含非数字段返回 None
+fn parse_version_triple(s: &str) -> Option<(u64, u64, u64)> {
+    let segs: Vec<&str> = s.split('.').collect();
+    if segs.is_empty() || segs.len() > 3 {
+        return None;
+    }
+    let mut n = [0u64; 3];
+    for (i, seg) in segs.iter().enumerate() {
+        if seg.is_empty() {
+            return None;
+        }
+        n[i] = seg.parse().ok()?;
+    }
+    Some((n[0], n[1], n[2]))
+}
+
+/// 从 ls-remote --tags 的输出里取最大的语义化版本 tag
+fn latest_tag_version(output: &str) -> Option<(u64, u64, u64)> {
+    let mut best: Option<(u64, u64, u64)> = None;
+    for line in output.lines() {
+        // 行格式：<sha>\trefs/tags/v1.2.3（附注 tag 会多一行 ...^{} 剥离行）
+        let Some((_sha, tag)) = line.split_once('\t') else {
+            continue;
+        };
+        let Some(name) = tag.strip_prefix("refs/tags/") else {
+            continue;
+        };
+        let name = name.strip_suffix("^{}").unwrap_or(name);
+        let name = name.strip_prefix('v').unwrap_or(name);
+        let Some(v) = parse_version_triple(name) else {
+            continue;
+        };
+        if best.map_or(true, |b| v > b) {
+            best = Some(v);
+        }
+    }
+    best
+}
+
+/// 检查更新：与私库远端的最新 tag 比对版本（网络失败不报错，前端友好展示）
+#[tauri::command]
+pub async fn check_update(state: tauri::State<'_, AppState>) -> Result<UpdateInfo, String> {
+    let st = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || check_update_impl(&st))
+        .await
+        .map_err(|e| format!("任务失败: {}", e))
+}
+
+fn check_update_impl(st: &AppState) -> UpdateInfo {
+    let cfg = st.cfg();
+    let current = env!("CARGO_PKG_VERSION").to_string();
+    // 仓库地址解析 owner/repo，失败回退默认仓库
+    const DEFAULT_SLUG: &str = "kistorm/ai-workbench-sync-tool";
+    let slug = parse_repo_slug(&cfg.git_repo).unwrap_or_else(|| DEFAULT_SLUG.into());
+    let release_url = format!("https://github.com/{}/releases/latest", slug);
+
+    let ssh_env = crate::sync::git_ssh_env(st);
+    let repo_dir = crate::sync::config_repo_dir();
+    // 已 clone 则在仓库目录内执行；否则直接对远程地址执行
+    let result = if repo_dir.join(".git").exists() {
+        run_cmd_dir(
+            "git",
+            &["ls-remote", "--tags", "origin"],
+            &repo_dir,
+            &ssh_env,
+        )
+    } else {
+        run_cmd("git", &["ls-remote", "--tags", &cfg.git_repo], &ssh_env)
+    };
+
+    let output = match result {
+        Ok(r) if r.ok => r.stdout,
+        _ => {
+            return UpdateInfo {
+                current,
+                latest: None,
+                has_update: false,
+                release_url,
+                message: "无法获取远端版本（请检查网络或仓库配置）".into(),
+            };
+        }
+    };
+
+    // 远端没有可识别的版本 tag：视为最新
+    let Some(v) = latest_tag_version(&output) else {
+        return UpdateInfo {
+            current: current.clone(),
+            latest: None,
+            has_update: false,
+            release_url,
+            message: "远端还没有可识别的版本 tag".into(),
+        };
+    };
+
+    let cur = parse_version_triple(&current).unwrap_or((0, 0, 0));
+    let has_update = v > cur;
+    let latest = format!("{}.{}.{}", v.0, v.1, v.2);
+    let message = if has_update {
+        format!("发现新版本 v{}，请在设置页点击「前往下载」", latest)
+    } else {
+        "当前已是最新版本".into()
+    };
+    UpdateInfo {
+        current,
+        latest: Some(latest),
+        has_update,
+        release_url,
+        message,
+    }
+}
+
+/// 用系统默认程序打开网页链接（仅允许 http/https）
+#[tauri::command]
+pub fn open_url(url: String) -> Result<(), String> {
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err("只允许打开 http/https 链接".into());
+    }
+    #[cfg(target_os = "linux")]
+    let r = run_cmd("xdg-open", &[&url], &[])?;
+    #[cfg(target_os = "macos")]
+    let r = run_cmd("open", &[&url], &[])?;
+    #[cfg(target_os = "windows")]
+    let r = run_cmd("cmd", &["/C", "start", "", &url], &[])?;
+    if !r.ok {
+        return Err("打开链接失败".into());
+    }
+    Ok(())
+}

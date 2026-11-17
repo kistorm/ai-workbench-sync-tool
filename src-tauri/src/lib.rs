@@ -76,6 +76,9 @@ pub fn run() {
             core::log_activity,
             core::get_running_action,
             core::app_info,
+            core::system_info,
+            core::check_update,
+            core::open_url,
             // onboarding
             onboard::onboard_status,
             onboard::onboard,

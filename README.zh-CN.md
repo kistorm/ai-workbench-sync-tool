@@ -65,7 +65,7 @@
 │  前端（React 19 + Tailwind v4 + xterm.js）              │
 │    总览 · SSH · AI 会话 · 笔记 · 设置                    │
 │                                                         │
-│  Rust 后端（53 个命令）                                  │
+│  Rust 后端（50+ 个命令）                                 │
 │    │                                                    │
 │    ├── assh  ────►  ~/.ssh/assh.yml  ──►  ~/.ssh/config │
 │    ├── PTY（portable-pty）──► 系统 ssh ──► 内嵌终端      │
@@ -216,6 +216,18 @@ pnpm tauri build        # 打包（.deb / AppImage / dmg / exe）
 - 未安装 crontab 时由**应用内定时器**兜底
 - **同步日志**：查看后台同步日志尾部
 
+### 系统与升级（设置页）
+
+- **系统信息**：设置页新增「系统与升级」区块，显示操作系统类型、系统版本、当前登录账户、应用版本号
+- **检查更新**：点击「检查更新」，通过 `git ls-remote --tags` 比对仓库中的版本 tag（如 `v0.2.0`）与当前版本；有新版本时显示「⇣ 前往下载」，点击跳转 GitHub Releases 页面下载对应平台安装包。无需任何 token（私有仓库走本机 SSH 密钥）
+- **网络加速推荐**：新增「网络加速推荐」区块，推荐xx云（xx-yun.com）科学上网/加速服务，点击直达推广链接；国内网络环境下访问 GitHub 更稳定
+
+### 安装包与 Release
+
+- 推送 `v*` tag（如 `v0.2.0`）后，GitHub Actions 自动在 Windows / macOS / Ubuntu 三平台构建并发布 Release
+- 产物：Windows `.msi` / `.exe`、macOS `.dmg` / `.app`、Ubuntu `.deb` / `.AppImage`，以及 Source code（zip / tar.gz）源码包
+- 升级路径：设置页「检查更新」→「⇣ 前往下载」→ 安装覆盖
+
 ### 主题与名称
 
 - 5 套主题：紫青霓虹、草绿森系、深蓝深海、黑白极简、浅绿晨光
@@ -301,6 +313,9 @@ Electerm 是单实例应用，应用会自动激活它的窗口（Linux 需要 `
 
 **Q：有道云笔记如何对接？**
 官方 OpenAPI 已停止新增申请。本项目采用 Cookie 方式拉取（仅拉取，不写回）。
+
+**Q：私有仓库下「检查更新」能工作吗？**
+能。检查走本机 SSH 密钥读取仓库 tag（`git ls-remote --tags`），不需要把仓库设为公开；下载安装包时浏览器已登录 GitHub 即可访问私有 Release。
 
 ## 许可证
 

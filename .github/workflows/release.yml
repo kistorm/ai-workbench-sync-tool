@@ -1,0 +1,90 @@
+# =============================================================
+# 三平台自动构建发布流程（Windows / macOS / Ubuntu）
+# 推送 v 开头的 tag（如 v0.1.0）时触发：
+#   1. 三平台并行构建 Tauri 安装包（.msi/.exe、.dmg/.app、.deb/.AppImage）
+#   2. 自动创建 GitHub Release 并上传各平台产物
+#   3. Ubuntu 额外打包源码 tar.gz 追加到同一 Release
+# =============================================================
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# 创建/上传 Release 需要 contents 写权限
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ubuntu-22.04, windows-latest, macos-latest]
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 pnpm 10
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      # setup-node 的 cache: pnpm 需要先装好 pnpm，故 action-setup 在前
+      - name: 安装 Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 安装 Rust stable 工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      # Rust 端在 src-tauri/，仓库根没有 Cargo.toml，需显式指定 workspace
+      - name: 缓存 Rust 编译产物
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: 安装 Ubuntu 系统依赖（Tauri 2 需要 webkit2gtk-4.1）
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2
+
+      # 仓库根存在 pnpm-lock.yaml，用 frozen-lockfile 保证 CI 与本地依赖一致
+      - name: 安装前端依赖
+        run: pnpm install --frozen-lockfile
+
+      # tauri 项目根即仓库根：tauri-action 读取 src-tauri/tauri.conf.json，
+      # 并执行其 beforeBuildCommand（pnpm build）完成前端构建
+      - name: 构建 Tauri 并创建 Release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "NEXUS Workbench ${{ github.ref_name }}"
+          releaseBody: "安装包：Windows（.msi/.exe）、macOS（.dmg/.app）、Ubuntu（.deb/.AppImage）。源码包见下方 Source code。更新说明见 README。"
+          releaseDraft: false
+          prerelease: false
+          projectPath: "."
+
+      # 仅 Ubuntu：用 git archive 打源码包，之后追加到同一 Release
+      - name: 打包源码 tar.gz
+        if: matrix.platform == 'ubuntu-22.04'
+        run: git archive --format=tar.gz -o source-${{ github.ref_name }}.tar.gz HEAD
+
+      # tauri-action 已按 tag 创建 Release；softprops 检测到同名 Release 时
+      # 默认追加 assets 不覆盖，故无需 overwrite_files
+      - name: 追加源码包到 Release
+        if: matrix.platform == 'ubuntu-22.04'
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: source-*.tar.gz

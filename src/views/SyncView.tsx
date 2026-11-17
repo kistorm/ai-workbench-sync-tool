@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import type { AppConfig, CronStatus, Diagnosis, ElectermInfo, RepoInfo, SshKeyInfo, SyncItemResult } from "../api";
+import type { AppConfig, CronStatus, Diagnosis, ElectermInfo, RepoInfo, SshKeyInfo, SyncItemResult, SystemInfo, UpdateInfo } from "../api";
 import { useAction, useAsync } from "../hooks";
 import { ErrorBox, Loading, Modal, useToast } from "../components/ui";
 import { THEMES, DEFAULT_APP_NAME } from "../theme";
@@ -33,6 +33,9 @@ export function SyncView({ theme, onThemeChange, appName, onAppNameChange }: Syn
   const [restoreOpen, setRestoreOpen] = useState(false);
   const [restoreConfirm, setRestoreConfirm] = useState(false);
   const [syncKeyVisible, setSyncKeyVisible] = useState(false);
+  const [sysInfo, setSysInfo] = useState<SystemInfo | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [checking, setChecking] = useState(false);
 
   useEffect(() => {
     if (cfgQ.data) {
@@ -45,6 +48,31 @@ export function SyncView({ theme, onThemeChange, appName, onAppNameChange }: Syn
   useEffect(() => {
     void api.detectElecterm().then(setElectermInfo).catch(() => {});
   }, []);
+
+  // 挂载时读取一次系统信息
+  useEffect(() => {
+    void api.getSystemInfo().then(setSysInfo).catch(() => {});
+  }, []);
+
+  async function checkUpdate() {
+    setChecking(true);
+    try {
+      const info = await api.checkUpdate();
+      setUpdateInfo(info);
+    } catch (e) {
+      push("err", "检查更新失败", String(e));
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  async function openRelease(url: string) {
+    try {
+      await api.openUrl(url);
+    } catch (e) {
+      push("err", "打开链接失败", String(e));
+    }
+  }
 
   function update<K extends keyof AppConfig>(key: K, value: AppConfig[K]) {
     setCfg((prev) => (prev ? { ...prev, [key]: value } : prev));
@@ -276,6 +304,57 @@ export function SyncView({ theme, onThemeChange, appName, onAppNameChange }: Syn
                 <p className="font-mono text-[10px] text-[var(--color-nexus-text-faint)] mt-1.5">
                   显示在左上角与窗口标题，修改即时生效；留空自动恢复「{DEFAULT_APP_NAME}」
                 </p>
+              </div>
+            </section>
+
+            {/* 系统与升级 */}
+            <section className="surface p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-mono text-[10px] tracking-[0.14em] text-[var(--color-nexus-text-faint)] uppercase">
+                  系统与升级
+                </h3>
+                <button className="btn" disabled={checking} onClick={checkUpdate}>
+                  {checking ? "检查中…" : "检查更新"}
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-2 font-mono text-xs">
+                <KV k="操作系统" v={sysInfo?.os_type ?? "—"} />
+                <KV k="系统版本" v={sysInfo?.os_version ?? "—"} />
+                <KV k="登录账户" v={sysInfo?.username ?? "—"} />
+                <KV k="应用版本" v={sysInfo?.app_version ?? "—"} />
+              </div>
+              {updateInfo && (
+                <div className="mt-3 pt-3 border-t border-white/5 flex items-center justify-between gap-3">
+                  <span className="font-mono text-[11px] text-[var(--color-nexus-text-dim)]">
+                    {updateInfo.message}
+                  </span>
+                  {updateInfo.has_update && updateInfo.latest && (
+                    <button className="btn shrink-0" onClick={() => openRelease(updateInfo.release_url)}>
+                      ⇣ 前往下载 v{updateInfo.latest}
+                    </button>
+                  )}
+                </div>
+              )}
+            </section>
+
+            {/* 网络加速推荐 */}
+            <section className="surface px-4 py-3 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-[12.5px] text-[var(--color-nexus-text)]">网络加速推荐</div>
+                <p className="font-mono text-[10px] text-[var(--color-nexus-text-faint)] mt-0.5">
+                  稳定访问 GitHub / 加速 clone 与推送，推荐 xx 云加速服务
+                </p>
+              </div>
+              <div className="shrink-0 flex flex-col items-end gap-1">
+                <button
+                  className="btn"
+                  onClick={() => openRelease("https://www.xx-yun.com/?code=HxaXgLvi")}
+                >
+                  打开 xx-yun
+                </button>
+                <span className="font-mono text-[9px] text-[var(--color-nexus-text-faint)]">
+                  推广支持 · 感谢使用
+                </span>
               </div>
             </section>
 

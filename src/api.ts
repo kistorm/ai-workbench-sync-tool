@@ -158,6 +158,21 @@ export interface AppInfo {
   arch: string;
 }
 
+export interface SystemInfo {
+  os_type: string;
+  os_version: string;
+  username: string;
+  app_version: string;
+}
+
+export interface UpdateInfo {
+  current: string;
+  latest: string | null;
+  has_update: boolean;
+  release_url: string;
+  message: string;
+}
+
 // ==================== API ====================
 
 export const api = {
@@ -174,6 +189,9 @@ export const api = {
     invoke<void>("log_activity", { kind, title, detail }),
   getRunningAction: () => invoke<RunningAction>("get_running_action"),
   appInfo: () => invoke<AppInfo>("app_info"),
+  getSystemInfo: () => invoke<SystemInfo>("system_info"),
+  checkUpdate: () => invoke<UpdateInfo>("check_update"),
+  openUrl: (url: string) => invoke<void>("open_url", { url }),
 
   // ssh
   listHosts: () => invoke<HostInfo[]>("list_hosts"),
