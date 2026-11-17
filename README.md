@@ -124,22 +124,49 @@ pnpm tauri dev          # development
 pnpm tauri build        # production bundle (.deb / AppImage / dmg / exe)
 ```
 
-### First-run setup (guided)
+### First-run setup (3-minute guide, just follow the steps)
 
-On first launch you get an onboarding screen with two modes:
+Launching the app for the first time opens the onboarding screen:
 
-| Mode | Flow |
-|---|---|
-| **Recover** | Connect repo → pull everything (progress bar) → decrypt with master password (per-file progress) → regenerate `~/.ssh/config` |
-| **Fresh** | Connect an **empty** repo → encrypt local data with master password → initial push (object upload progress) |
+![Onboarding - choose mode](docs/images/06-onboarding.png)
 
-**Safeguards shared by both modes:**
+#### Scenario A: first time (Fresh mode) — encrypt & upload this machine's data
+
+> Use when: you already have SSH configs / notes / AI sessions on this machine and want them backed up to the cloud.
+
+| Step | Action | Notes |
+|---|---|---|
+| 1 | Click **“⇡ Fresh”** | Opens the form |
+| 2 | Fill in the **Git repo URL** | First create a **private empty repo** on GitHub, then enter `git@github.com:you/your-repo.git` (this exact format — anything else is rejected) |
+| 3 | Click **“Check connectivity”** | Wait for the green ✓ (retries automatically, network glitches handled) |
+| 4 | Set the **master password** (twice) | At least 6 chars, **remember it** — it encrypts everything in the cloud |
+| 5 | Click **“⇡ Encrypt & push”** | Watch the progress bar (encrypt → commit → upload %) |
+| 6 | Wait for the **5-second countdown** | Auto-enters the main UI — done ✅ |
+
+![Onboarding - Fresh form](docs/images/07-onboarding-fresh.png)
+
+#### Scenario B: new machine / reinstall (Recover mode) — pull everything back from the cloud
+
+> Use when: the tool is installed on a new machine and you want SSH hosts (incl. passwords), notes and AI sessions back.
+
+| Step | Action | Notes |
+|---|---|---|
+| 1 | Click **“⇣ Recover”** | Opens the form |
+| 2 | Enter the **same repo URL** | Exactly the one used when uploading |
+| 3 | Click **“Check connectivity”** | Green ✓ |
+| 4 | Enter the **original master password** → click **“⇣ Start recovery”** | Progress: pull → decrypt → generate SSH config |
+| 5 | Countdown ends, main UI opens | SSH hosts/passwords, notes and AI sessions are all back ✅ |
+
+> 💡 Wrong password? You'll see “incorrect master password” and the password field gets focused — the content was already pulled on the first click, so fixing the password and retrying takes **seconds, no re-download**.
+>
+> 💡 Forgot the master password? Set a new one in Settings → click “⇡ Full push” to re-encrypt the cloud copy with it.
+
+#### Safeguards shared by both modes
 
 - **Strict Git URL validation**: only `git@host:owner/repo.git` is accepted — `https://`, `ssh://` and local paths are rejected in real time as you type (saving the config enforces the same rule)
 - **Mandatory connectivity check**: after entering the URL you must click “Check connectivity” (`git ls-remote`) before continuing; editing the URL clears the previous check result
 - **Live progress panel**: stage description + percentage + progress bar + elapsed time; git's object-transfer progress is parsed for push/pull
 - **Automatic network retries**: connectivity check, pull and push all retry 3 times (3 s apart); the progress panel shows “retry N”
-- **Clear wrong-password handling**: if 0 files decrypt, you get “incorrect master password” and the password field is auto-focused; the cloud content is already local, so fixing the password and retrying takes seconds — no re-download
 - **5-second countdown** into the main UI on success (with a “Enter now” button)
 - **assh bootstrap config**: when `~/.ssh/assh.yml` is missing, a minimal transport-only config is generated automatically (just the git-sync channel, no user hosts) so the recovery flow itself can reach the network
 
