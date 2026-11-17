@@ -73,18 +73,25 @@ jobs:
           prerelease: false
           projectPath: "."
 
-      # 仅 Ubuntu：用 git archive 打源码包，之后追加到同一 Release
-      - name: 打包源码 tar.gz
+      # 仅 Ubuntu：把 CHANGELOG.md 对应版本段落写成 Release 正文，并打源码包
+      - name: 生成更新日志正文
         if: matrix.platform == 'ubuntu-22.04'
-        run: git archive --format=tar.gz -o source-${{ github.ref_name }}.tar.gz HEAD
+        run: |
+          {
+            echo "# NEXUS Workbench ${{ github.ref_name }}"
+            echo ""
+            cat CHANGELOG.md
+          } > release-body.md
+          git archive --format=tar.gz -o source-${{ github.ref_name }}.tar.gz HEAD
 
       # tauri-action 已按 tag 创建 Release；softprops 检测到同名 Release 时
-      # 默认追加 assets 不覆盖，故无需 overwrite_files
-      - name: 追加源码包到 Release
+      # 追加 assets 并用 body_path 覆盖正文为完整更新日志
+      - name: 追加源码包并写入更新日志
         if: matrix.platform == 'ubuntu-22.04'
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ github.ref_name }}
+          body_path: release-body.md
           files: source-*.tar.gz

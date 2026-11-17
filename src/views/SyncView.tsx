@@ -324,14 +324,21 @@ export function SyncView({ theme, onThemeChange, appName, onAppNameChange }: Syn
                 <KV k="应用版本" v={sysInfo?.app_version ?? "—"} />
               </div>
               {updateInfo && (
-                <div className="mt-3 pt-3 border-t border-white/5 flex items-center justify-between gap-3">
-                  <span className="font-mono text-[11px] text-[var(--color-nexus-text-dim)]">
-                    {updateInfo.message}
-                  </span>
-                  {updateInfo.has_update && updateInfo.latest && (
-                    <button className="btn shrink-0" onClick={() => openRelease(updateInfo.release_url)}>
-                      ⇣ 前往下载 v{updateInfo.latest}
-                    </button>
+                <div className="mt-3 pt-3 border-t border-white/5 space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-mono text-[11px] text-[var(--color-nexus-text-dim)]">
+                      {updateInfo.message}
+                    </span>
+                    {updateInfo.has_update && updateInfo.latest && (
+                      <button className="btn shrink-0" onClick={() => openRelease(updateInfo.release_url)}>
+                        ⇣ 前往下载 v{updateInfo.latest}
+                      </button>
+                    )}
+                  </div>
+                  {updateInfo.changelog && (
+                    <pre className="font-mono text-[10.5px] leading-relaxed text-[var(--color-nexus-text-dim)] bg-white/[0.03] border border-white/5 rounded-lg px-3 py-2 whitespace-pre-wrap break-words max-h-44 overflow-y-auto">
+                      {updateInfo.changelog}
+                    </pre>
                   )}
                 </div>
               )}

@@ -608,24 +608,9 @@ pub struct UpdateInfo {
     pub current: String,        // 当前版本
     pub latest: Option<String>, // 远端最新 tag 版本（无则 None）
     pub has_update: bool,
-    pub release_url: String, // 最新 release 页面
-    pub message: String,     // 给用户看的中文结果说明
-}
-
-/// 从 git@host:owner/repo.git 解析出 owner/repo，格式不符返回 None
-fn parse_repo_slug(url: &str) -> Option<String> {
-    let path = url.trim().split(':').nth(1)?;
-    let mut segs = path.split('/');
-    let owner = segs.next()?.trim();
-    let repo = segs.next()?.trim();
-    if owner.is_empty() || repo.is_empty() {
-        return None;
-    }
-    let repo = repo.strip_suffix(".git").unwrap_or(repo);
-    if repo.is_empty() {
-        return None;
-    }
-    Some(format!("{}/{}", owner, repo))
+    pub release_url: String,        // 最新 release 页面
+    pub changelog: Option<String>,  // 该版本的更新日志（来自仓库 CHANGELOG.md）
+    pub message: String,            // 给用户看的中文结果说明
 }
 
 /// 版本号解析成 (major, minor, patch)：不足三段补 0，含非数字段返回 None
@@ -676,27 +661,87 @@ pub async fn check_update(state: tauri::State<'_, AppState>) -> Result<UpdateInf
         .map_err(|e| format!("任务失败: {}", e))
 }
 
-fn check_update_impl(st: &AppState) -> UpdateInfo {
-    let cfg = st.cfg();
-    let current = env!("CARGO_PKG_VERSION").to_string();
-    // 仓库地址解析 owner/repo，失败回退默认仓库
-    const DEFAULT_SLUG: &str = "kistorm/ai-workbench-sync-tool";
-    let slug = parse_repo_slug(&cfg.git_repo).unwrap_or_else(|| DEFAULT_SLUG.into());
-    let release_url = format!("https://github.com/{}/releases/latest", slug);
+/// 应用自身代码仓库（升级检查/更新日志固定查这里，与用户的数据仓库无关）
+const APP_REPO_SLUG: &str = "kistorm/ai-workbench-sync-tool";
+const APP_REPO_URL: &str = "git@github.com:kistorm/ai-workbench-sync-tool.git";
 
-    let ssh_env = crate::sync::git_ssh_env(st);
-    let repo_dir = crate::sync::config_repo_dir();
-    // 已 clone 则在仓库目录内执行；否则直接对远程地址执行
-    let result = if repo_dir.join(".git").exists() {
-        run_cmd_dir(
-            "git",
-            &["ls-remote", "--tags", "origin"],
-            &repo_dir,
-            &ssh_env,
-        )
+/// 从 CHANGELOG.md 文本里提取指定版本（"## v1.2.3"）到下一个 "## " 的段落
+fn extract_changelog_section(text: &str, version: &str) -> Option<String> {
+    let header = format!("## v{}", version);
+    let mut out = String::new();
+    let mut in_section = false;
+    for line in text.lines() {
+        if line.starts_with("## ") {
+            if in_section {
+                break;
+            }
+            if line.starts_with(&header) {
+                in_section = true;
+                out.push_str(line);
+                out.push('\n');
+            }
+        } else if in_section {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    if in_section && out.trim().len() > header.len() {
+        Some(out.trim_end().to_string())
     } else {
-        run_cmd("git", &["ls-remote", "--tags", &cfg.git_repo], &ssh_env)
+        None
+    }
+}
+
+/// 浅克隆应用仓库到本地缓存，读取 CHANGELOG.md 中指定版本的更新日志
+fn fetch_changelog(st: &AppState, version: &str, ssh_env: &[(&str, String)]) -> Option<String> {
+    let cache = st.data_dir.join("update-cache").join("app-repo");
+    let ok = if cache.join(".git").exists() {
+        // 已缓存：fetch 最新 main 并复位
+        let fetched = run_cmd_dir(
+            "git",
+            &["fetch", "--depth", "1", "-q", "origin", "main"],
+            &cache,
+            ssh_env,
+        )
+        .map(|r| r.ok)
+        .unwrap_or(false);
+        fetched
+            && run_cmd_dir("git", &["reset", "--hard", "-q", "FETCH_HEAD"], &cache, &[])
+                .map(|r| r.ok)
+                .unwrap_or(false)
+    } else {
+        let _ = fs::create_dir_all(st.data_dir.join("update-cache"));
+        let _ = fs::remove_dir_all(&cache);
+        run_cmd(
+            "git",
+            &[
+                "clone",
+                "--depth",
+                "1",
+                "-q",
+                APP_REPO_URL,
+                cache.to_str().unwrap_or(""),
+            ],
+            ssh_env,
+        )
+        .map(|r| r.ok)
+        .unwrap_or(false)
     };
+    if !ok {
+        return None;
+    }
+    let text = fs::read_to_string(cache.join("CHANGELOG.md")).ok()?;
+    extract_changelog_section(&text, version)
+}
+
+fn check_update_impl(st: &AppState) -> UpdateInfo {
+    let current = env!("CARGO_PKG_VERSION").to_string();
+    // 升级检查固定查应用代码仓库（不随用户的数据仓库变化）
+    let release_url = format!("https://github.com/{}/releases/latest", APP_REPO_SLUG);
+    let ssh_env = crate::sync::git_ssh_env(st);
+
+    // 直接对应用代码仓库执行 ls-remote
+    let result = run_cmd("git", &["ls-remote", "--tags", APP_REPO_URL], &ssh_env);
 
     let output = match result {
         Ok(r) if r.ok => r.stdout,
@@ -706,6 +751,7 @@ fn check_update_impl(st: &AppState) -> UpdateInfo {
                 latest: None,
                 has_update: false,
                 release_url,
+                changelog: None,
                 message: "无法获取远端版本（请检查网络或仓库配置）".into(),
             };
         }
@@ -718,6 +764,7 @@ fn check_update_impl(st: &AppState) -> UpdateInfo {
             latest: None,
             has_update: false,
             release_url,
+            changelog: None,
             message: "远端还没有可识别的版本 tag".into(),
         };
     };
@@ -730,11 +777,14 @@ fn check_update_impl(st: &AppState) -> UpdateInfo {
     } else {
         "当前已是最新版本".into()
     };
+    // 拉取该版本的更新日志（失败不影响检查结果）
+    let changelog = fetch_changelog(st, &latest, &ssh_env);
     UpdateInfo {
         current,
         latest: Some(latest),
         has_update,
         release_url,
+        changelog,
         message,
     }
 }

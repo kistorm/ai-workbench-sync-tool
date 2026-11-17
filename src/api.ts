@@ -170,6 +170,7 @@ export interface UpdateInfo {
   latest: string | null;
   has_update: boolean;
   release_url: string;
+  changelog: string | null;
   message: string;
 }
 
