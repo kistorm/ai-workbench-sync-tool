@@ -219,14 +219,15 @@ pnpm tauri build        # 打包（.deb / AppImage / dmg / exe）
 ### 系统与升级（设置页）
 
 - **系统信息**：设置页新增「系统与升级」区块，显示操作系统类型、系统版本、当前登录账户、应用版本号
-- **检查更新**：点击「检查更新」，通过 `git ls-remote --tags` 比对仓库中的版本 tag（如 `v0.2.0`）与当前版本；有新版本时显示「⇣ 前往下载」，点击跳转 GitHub Releases 页面下载对应平台安装包。无需任何 token（私有仓库走本机 SSH 密钥）
+- **检查更新**：点击「检查更新」，通过 `git ls-remote --tags` 比对仓库中的版本 tag 与当前版本，并显示该版本的更新日志；无需任何 token（私有仓库走本机 SSH 密钥）
+- **一键自动升级**：检测到新版本后点「⇣ 立即升级」，应用自动下载对应平台安装包（带百分比进度条）并安装重启——macOS 替换 `/Applications` 下的 app、Windows 静默安装、Linux 替换当前 AppImage。自动升级需仓库保持公开（匿名下载 Release 资源）；私有仓库请用「前往下载」手动安装
 - **网络加速推荐**：新增「网络加速推荐」区块，推荐xx云（xx-yun.com）科学上网/加速服务，点击直达推广链接；国内网络环境下访问 GitHub 更稳定
 
 ### 安装包与 Release
 
 - 推送 `v*` tag（如 `v0.2.1`）后，GitHub Actions 自动在 Windows / macOS（通用二进制）/ Ubuntu 构建并发布 Release
 - 产物：Windows `.msi` / `.exe`、macOS `.dmg`、Ubuntu `.deb` / `.AppImage`，以及 Source code（zip / tar.gz）源码包
-- 升级路径：设置页「检查更新」→「⇣ 前往下载」→ 安装覆盖
+- 升级路径：设置页「检查更新」→「⇣ 立即升级」（自动下载安装并重启），或「前往下载」手动安装
 
 **macOS 选包**：Release 提供两个 **通用包**（Intel 与 Apple Silicon 二合一，无需分辨芯片）：
 

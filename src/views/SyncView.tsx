@@ -36,6 +36,9 @@ export function SyncView({ theme, onThemeChange, appName, onAppNameChange }: Syn
   const [sysInfo, setSysInfo] = useState<SystemInfo | null>(null);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [checking, setChecking] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const [updPct, setUpdPct] = useState(0);
+  const [updPhase, setUpdPhase] = useState("");
 
   useEffect(() => {
     if (cfgQ.data) {
@@ -63,6 +66,38 @@ export function SyncView({ theme, onThemeChange, appName, onAppNameChange }: Syn
       push("err", "检查更新失败", String(e));
     } finally {
       setChecking(false);
+    }
+  }
+
+  // 自动升级：下载期间轮询后端进度
+  useEffect(() => {
+    if (!updating) return;
+    const id = window.setInterval(() => {
+      api
+        .updateProgress()
+        .then((p) => {
+          setUpdPct(p.percent);
+          if (p.phase) setUpdPhase(p.phase);
+        })
+        .catch(() => {});
+    }, 500);
+    return () => window.clearInterval(id);
+  }, [updating]);
+
+  /** 下载并自动安装最新版本（macOS 替换 app 重启 / Windows 静默安装 / Linux 替换 AppImage） */
+  async function autoUpgrade() {
+    if (!updateInfo?.has_update || updating) return;
+    setUpdating(true);
+    setUpdPct(0);
+    setUpdPhase("downloading");
+    try {
+      const d = await api.downloadUpdate();
+      setUpdPhase("installing");
+      const msg = await api.installUpdate(d.path, d.version);
+      push("info", `正在升级到 v${d.version}`, msg);
+    } catch (e) {
+      push("err", "自动升级失败", String(e));
+      setUpdating(false);
     }
   }
 
@@ -330,11 +365,33 @@ export function SyncView({ theme, onThemeChange, appName, onAppNameChange }: Syn
                       {updateInfo.message}
                     </span>
                     {updateInfo.has_update && updateInfo.latest && (
-                      <button className="btn shrink-0" onClick={() => openRelease(updateInfo.release_url)}>
-                        ⇣ 前往下载 v{updateInfo.latest}
-                      </button>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          className="btn btn--primary shrink-0"
+                          disabled={updating}
+                          onClick={autoUpgrade}
+                        >
+                          {updating
+                            ? updPhase === "installing"
+                              ? "正在安装…"
+                              : `下载中 ${updPct}%`
+                            : `⇣ 立即升级 v${updateInfo.latest}`}
+                        </button>
+                        <button
+                          className="btn shrink-0"
+                          disabled={updating}
+                          onClick={() => openRelease(updateInfo.release_url)}
+                        >
+                          前往下载
+                        </button>
+                      </div>
                     )}
                   </div>
+                  {updating && updPhase === "downloading" && (
+                    <div className="progress-track">
+                      <div className="progress-fill" style={{ width: `${updPct}%` }} />
+                    </div>
+                  )}
                   {updateInfo.changelog && (
                     <pre className="font-mono text-[10.5px] leading-relaxed text-[var(--color-nexus-text-dim)] bg-white/[0.03] border border-white/5 rounded-lg px-3 py-2 whitespace-pre-wrap break-words max-h-44 overflow-y-auto">
                       {updateInfo.changelog}

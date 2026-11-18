@@ -7,6 +7,7 @@ mod onboard;
 mod ssh;
 mod sync;
 mod terminal;
+mod update;
 mod youdao;
 #[cfg(test)]
 mod tests;
@@ -77,6 +78,9 @@ pub fn run() {
             core::get_running_action,
             core::app_info,
             core::system_info,
+            update::download_update,
+            update::install_update,
+            update::update_progress,
             core::check_update,
             core::open_url,
             // onboarding

@@ -165,6 +165,19 @@ export interface SystemInfo {
   app_version: string;
 }
 
+export interface UpdateProgress {
+  phase: string;
+  downloaded: number;
+  total: number;
+  percent: number;
+}
+
+export interface DownloadedUpdate {
+  version: string;
+  asset: string;
+  path: string;
+}
+
 export interface UpdateInfo {
   current: string;
   latest: string | null;
@@ -192,6 +205,10 @@ export const api = {
   appInfo: () => invoke<AppInfo>("app_info"),
   getSystemInfo: () => invoke<SystemInfo>("system_info"),
   checkUpdate: () => invoke<UpdateInfo>("check_update"),
+  downloadUpdate: () => invoke<DownloadedUpdate>("download_update"),
+  installUpdate: (path: string, version: string) =>
+    invoke<string>("install_update", { path, version }),
+  updateProgress: () => invoke<UpdateProgress>("update_progress"),
   openUrl: (url: string) => invoke<void>("open_url", { url }),
 
   // ssh

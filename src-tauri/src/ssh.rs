@@ -867,12 +867,41 @@ pub async fn force_pull_ssh_config(state: State<'_, AppState>) -> Result<String,
 
         // 网络参数：统一 GIT_SSH_COMMAND（github 走 443），失败自动重试 3 次
         let ssh_env = crate::sync::git_ssh_env(&st);
+
+        // 性能优化：SSH 单独恢复只需要 assh.yml 一个文件。
+        // 用 blobless 部分克隆 + 浅拉取，避免把整个数据仓库（数百 MB）都下载下来。
+        let _ = run_cmd(
+            "git",
+            &["-C", &repo_str, "config", "remote.origin.promisor", "true"],
+            &[],
+        );
+        let _ = run_cmd(
+            "git",
+            &[
+                "-C",
+                &repo_str,
+                "config",
+                "remote.origin.partialclonefilter",
+                "blob:none",
+            ],
+            &[],
+        );
+
         let mut fetch_err = String::new();
         let mut fetch_ok = false;
         for attempt in 1..=3usize {
             let f = run_cmd(
                 "git",
-                &["-C", &repo_str, "fetch", "-q", "origin"],
+                &[
+                    "-C",
+                    &repo_str,
+                    "fetch",
+                    "-q",
+                    "--depth=1",
+                    "--filter=blob:none",
+                    "--no-tags",
+                    "origin",
+                ],
                 &ssh_env,
             );
             match f {
@@ -885,6 +914,27 @@ pub async fn force_pull_ssh_config(state: State<'_, AppState>) -> Result<String,
             }
             if attempt < 3 {
                 std::thread::sleep(std::time::Duration::from_secs(3));
+            }
+        }
+        if !fetch_ok {
+            // 服务端不支持部分克隆时，退回普通浅拉取
+            for attempt in 1..=2usize {
+                let f = run_cmd(
+                    "git",
+                    &["-C", &repo_str, "fetch", "-q", "--depth=1", "origin"],
+                    &ssh_env,
+                );
+                match f {
+                    Ok(r) if r.ok => {
+                        fetch_ok = true;
+                        break;
+                    }
+                    Ok(r) => fetch_err = r.combined(),
+                    Err(e) => fetch_err = e,
+                }
+                if attempt < 2 {
+                    std::thread::sleep(std::time::Duration::from_secs(3));
+                }
             }
         }
         if !fetch_ok {

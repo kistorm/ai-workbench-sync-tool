@@ -229,7 +229,7 @@ Launching the app for the first time opens the onboarding screen:
 
 - Pushing a `v*` tag (e.g. `v0.2.1`) makes GitHub Actions build and publish a Release on Windows / macOS (universal binary) / Ubuntu automatically
 - Artifacts: Windows `.msi` / `.exe`, macOS `.dmg`, Ubuntu `.deb` / `.AppImage`, plus Source code (zip / tar.gz) archives
-- Upgrade path: Settings → `Check update` → `⇣ Download vX` → install over the existing app
+- Upgrade path: Settings → `Check update` → `⇣ Upgrade now` (automatic download, install and restart) or `Download` for a manual install
 
 **macOS package**: the Release provides two **universal builds** (one binary for Intel and Apple Silicon):
 
