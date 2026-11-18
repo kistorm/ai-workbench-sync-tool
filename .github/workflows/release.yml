@@ -23,19 +23,13 @@ jobs:
       matrix:
         include:
           - platform: ubuntu-22.04
-            target: ""
             args: ""
           - platform: windows-latest
-            target: ""
             args: ""
-          # Apple Silicon（M 系列）
+          # macOS 通用二进制：同时包含 Intel(x86_64) 与 Apple Silicon(aarch64)，
+          # 一个 DMG 通吃两种芯片（GitHub 对多个 macOS job 有容量限制，单 job 最稳）
           - platform: macos-14
-            target: aarch64-apple-darwin
-            args: --target aarch64-apple-darwin
-          # Intel 芯片（macos-14 是 arm64 运行器，交叉编译出 x86_64 包）
-          - platform: macos-14
-            target: x86_64-apple-darwin
-            args: --target x86_64-apple-darwin
+            args: --target universal-apple-darwin
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -57,17 +51,17 @@ jobs:
       - name: 安装 Rust stable 工具链
         uses: dtolnay/rust-toolchain@stable
 
-      # macOS 交叉编译：arm64 运行器上额外装 x86_64 target
-      - name: 添加交叉编译 target
-        if: matrix.target != ''
-        run: rustup target add ${{ matrix.target }}
+      # macOS 通用包：arm64 运行器需要额外装 x86_64 target（aarch64 是默认）
+      - name: 添加 macOS 双架构 target
+        if: matrix.platform == 'macos-14'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
 
       # Rust 端在 src-tauri/，仓库根没有 Cargo.toml，需显式指定 workspace
       - name: 缓存 Rust 编译产物
         uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-          key: ${{ matrix.target }}
+          key: ${{ matrix.args }}
 
       - name: 安装 Ubuntu 系统依赖（Tauri 2 需要 webkit2gtk-4.1）
         if: matrix.platform == 'ubuntu-22.04'
@@ -91,7 +85,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "NEXUS Workbench ${{ github.ref_name }}"
-          releaseBody: "安装包：Windows（.msi/.exe）、macOS（Intel：x64.dmg / Apple Silicon：aarch64.dmg）、Ubuntu（.deb/.AppImage）。源码包见下方 Source code。更新说明见 CHANGELOG.md。"
+          releaseBody: "安装包：Windows（.msi/.exe）、macOS 通用包（Intel + Apple Silicon，universal.dmg）、Ubuntu（.deb/.AppImage）。源码包见下方 Source code。更新说明见 CHANGELOG.md。"
           releaseDraft: false
           prerelease: false
           projectPath: "."

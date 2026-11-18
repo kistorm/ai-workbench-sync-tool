@@ -227,18 +227,11 @@ Launching the app for the first time opens the onboarding screen:
 
 ### Packages & Release
 
-- Pushing a `v*` tag (e.g. `v0.2.1`) makes GitHub Actions build and publish a Release on Windows / macOS (both architectures) / Ubuntu automatically
+- Pushing a `v*` tag (e.g. `v0.2.1`) makes GitHub Actions build and publish a Release on Windows / macOS (universal binary) / Ubuntu automatically
 - Artifacts: Windows `.msi` / `.exe`, macOS `.dmg`, Ubuntu `.deb` / `.AppImage`, plus Source code (zip / tar.gz) archives
 - Upgrade path: Settings → `Check update` → `⇣ Download vX` → install over the existing app
 
-**Which macOS build do I need?**
-
-| Your Mac | Download |
-|---|---|
-| Intel (pre-2020 models, "About This Mac" shows an Intel processor) | `nexus-workbench_x.y.z_x64.dmg` |
-| Apple Silicon (M1/M2/M3/M4, "About This Mac" shows an Apple M-series chip) | `nexus-workbench_x.y.z_aarch64.dmg` |
-
-Requires macOS 12 Monterey or later. **If the first launch says “the app is damaged” or “cannot verify the developer”**, that is the expected Gatekeeper prompt for a non-notarized app (not real corruption). Use either fix:
+**macOS package**: the Release provides a single **universal build** `nexus-workbench_x.y.z_universal.dmg` that runs on both Intel and Apple Silicon (M1/M2/M3/M4) — no need to pick a chip. Requires macOS 12 Monterey or later. **If the first launch says “the app is damaged” or “cannot verify the developer”**, that is the expected Gatekeeper prompt for a non-notarized app (not real corruption). Use either fix:
 
 ```bash
 # Option 1: clear the quarantine flag, then open normally
