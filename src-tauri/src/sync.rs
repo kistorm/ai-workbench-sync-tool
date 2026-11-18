@@ -506,6 +506,8 @@ pub(crate) fn encrypt_ssh_only(
     repo: &Path,
     passphrase: &str,
 ) -> Result<usize, String> {
+    // mac/Windows：先把 ~/.ssh/assh.yml 同步进仓库
+    let _ = sync_local_ssh_yml_to_repo(st);
     setup_gitignore(repo, true)?;
     let _ = run_cmd_dir(
         "git",
@@ -558,6 +560,71 @@ pub(crate) fn encrypt_ssh_only(
     Ok(count)
 }
 
+/// 判断两个路径是否指向同一个文件（含符号链接解析）。
+/// Linux 上 ~/.ssh/assh.yml 常是仓库文件的软链接，此时应跳过同步避免自我覆盖。
+fn same_path(a: &Path, b: &Path) -> bool {
+    match (fs::canonicalize(a), fs::canonicalize(b)) {
+        (Ok(x), Ok(y)) => x == y,
+        _ => false,
+    }
+}
+
+/// 是否为引导生成的占位 assh.yml（仅含 git 传输通道）。
+/// 用于修复旧版本在 mac/Windows 上恢复后本地仍是引导文件的问题。
+pub(crate) fn is_bootstrap_yml(p: &Path) -> bool {
+    fs::read_to_string(p)
+        .map(|s| s.contains("由 NEXUS Workbench 引导生成"))
+        .unwrap_or(false)
+}
+
+/// 是否为符号链接（包括目标已删除的悬空链接）。
+/// 悬空软链写入会穿透到目标文件，必须跳过复制，否则可能自我截断。
+fn is_symlink(p: &Path) -> bool {
+    fs::symlink_metadata(p)
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
+}
+
+/// 拉取/恢复后：把仓库里的 assh.yml 同步到 ~/.ssh/assh.yml。
+/// macOS / Windows 上这两个文件是独立的（没有软链接），不同步会导致
+/// 恢复完成后 SSH 页读取 ~/.ssh/assh.yml 仍是空/引导配置，看不到云端主机。
+pub(crate) fn sync_repo_ssh_yml_to_local(st: &AppState) -> Result<(), String> {
+    let repo_yml = config_repo_dir().join("assh.yml");
+    if !repo_yml.is_file() {
+        return Ok(());
+    }
+    let ssh_yml = crate::ssh::ssh_dir_of(st).join("assh.yml");
+    if is_symlink(&ssh_yml) || same_path(&repo_yml, &ssh_yml) {
+        return Ok(());
+    }
+    if let Some(parent) = ssh_yml.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    fs::copy(&repo_yml, &ssh_yml)
+        .map_err(|e| format!("同步 assh.yml 到 ~/.ssh 失败: {}", e))?;
+    Ok(())
+}
+
+/// 推送前：把 ~/.ssh/assh.yml 同步回仓库。
+/// mac/Windows 上用户编辑的是 ~/.ssh/assh.yml，不同步会导致推送的还是旧仓库文件。
+pub(crate) fn sync_local_ssh_yml_to_repo(st: &AppState) -> Result<(), String> {
+    let ssh_yml = crate::ssh::ssh_dir_of(st).join("assh.yml");
+    if !ssh_yml.is_file() {
+        return Ok(());
+    }
+    let repo_dir = config_repo_dir();
+    if !repo_dir.exists() {
+        return Ok(());
+    }
+    let repo_yml = repo_dir.join("assh.yml");
+    if is_symlink(&ssh_yml) || same_path(&ssh_yml, &repo_yml) {
+        return Ok(());
+    }
+    fs::copy(&ssh_yml, &repo_yml)
+        .map_err(|e| format!("同步 assh.yml 到仓库失败: {}", e))?;
+    Ok(())
+}
+
 /// 同 encrypt_all，但每处理一个文件回调 (已完成, 总数)，用于界面进度条
 pub(crate) fn encrypt_all_with_progress(
     st: &AppState,
@@ -565,6 +632,8 @@ pub(crate) fn encrypt_all_with_progress(
     passphrase: &str,
     mut on_progress: impl FnMut(usize, usize),
 ) -> Result<usize, String> {
+    // mac/Windows：先把 ~/.ssh/assh.yml 同步进仓库，保证推送的是最新主机配置
+    let _ = sync_local_ssh_yml_to_repo(st);
     setup_gitignore(repo, true)?;
     // 把已跟踪的明文移出索引，避免继续提交明文
     let _ = run_cmd_dir(
@@ -741,6 +810,8 @@ pub fn sync_data_repo(st: &AppState, action: &str) -> SyncItemResult {
                 };
             }
         } else {
+            // 明文模式同样需要把 ~/.ssh/assh.yml 同步进仓库（mac/Windows 独立文件）
+            let _ = sync_local_ssh_yml_to_repo(st);
             let _ = setup_gitignore(&repo_dir, false);
         }
         let add = run_cmd_dir("git", &["add", "-A"], &repo_dir, &[]);
@@ -795,7 +866,8 @@ pub fn sync_data_repo(st: &AppState, action: &str) -> SyncItemResult {
     }
 
     if !push_like {
-        // 拉取会更新 assh.yml，这里同步重建 ~/.ssh/config，否则 ssh 别名仍是旧的
+        // 拉取会更新 assh.yml：先同步到 ~/.ssh（mac/Windows 独立文件），再重建 config
+        let _ = sync_repo_ssh_yml_to_local(st);
         let build_note = match crate::ssh::build_ssh_config_impl(st) {
             Ok(_) => "，已重建 ~/.ssh/config".to_string(),
             Err(e) => format!("，但重建 ssh config 失败: {}", e),
@@ -968,6 +1040,8 @@ pub async fn force_restore(state: State<'_, AppState>) -> Result<String, String>
         if !cfg.encrypt_password.is_empty() {
             let _ = decrypt_all(&st, &repo, &cfg.encrypt_password);
         }
+        // 同步到 ~/.ssh（mac/Windows 上 assh.yml 是独立文件），再重建 config
+        let _ = sync_repo_ssh_yml_to_local(&st);
         // 重建 ~/.ssh/config，让恢复后的 assh.yml 立即生效
         let cfg_msg = crate::ssh::build_ssh_config_impl(&st)
             .unwrap_or_else(|e| format!("（重建 ssh config 失败: {}）", e));

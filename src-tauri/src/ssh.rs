@@ -139,6 +139,12 @@ fn read_template_defaults(state: &AppState, template: &str) -> (Option<String>, 
 
 /// 列出主机：优先用 assh config json（已解析 inherit/默认值），失败回退 YAML
 fn load_hosts(state: &AppState) -> Result<Vec<HostInfo>, String> {
+    // mac/Windows：~/.ssh/assh.yml 与仓库文件相互独立；
+    // 若本地缺失（例如恢复后尚未重启），先从仓库补一份，避免主机列表为空
+    let local_yml = assh_yml_path(state);
+    if !local_yml.is_file() || crate::sync::is_bootstrap_yml(&local_yml) {
+        let _ = crate::sync::sync_repo_ssh_yml_to_local(state);
+    }
     let inherits = read_inherits(state);
     let mut hosts: Vec<HostInfo> = vec![];
 
@@ -424,6 +430,8 @@ pub fn save_assh_yml(state: State<AppState>, content: String) -> Result<(), Stri
     let path = assh_yml_path(&state);
     fs::write(&path, content).map_err(|e| format!("写入失败: {}", e))?;
     state.log("info", "assh.yml 已保存", &path.to_string_lossy());
+    // mac/Windows：同步一份到仓库，保证后续推送的是最新内容
+    let _ = crate::sync::sync_local_ssh_yml_to_repo(state.inner());
     Ok(())
 }
 
@@ -950,6 +958,8 @@ pub async fn force_pull_ssh_config(state: State<'_, AppState>) -> Result<String,
         }
 
         // 重建 ~/.ssh/config 使恢复的配置立即生效
+        // mac/Windows：仓库与 ~/.ssh 的 assh.yml 是独立文件，恢复后必须同步
+        let _ = crate::sync::sync_repo_ssh_yml_to_local(&st);
         let msg = build_ssh_config_impl(&st)?;
         st.log(
             "sync",
