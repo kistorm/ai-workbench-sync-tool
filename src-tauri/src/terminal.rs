@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, State};
 
 pub struct TermSession {
-    writer: Box<dyn Write + Send>,
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn Child + Send + Sync>,
 }
@@ -52,17 +52,10 @@ pub fn ssh_terminal_open(
         })
         .map_err(|e| format!("创建 PTY 失败: {}", e))?;
 
-    // 有保存密码时用 sshpass 自动登录；无密码则交给 ssh 交互提示
+    // 有保存密码时由 PTY 读取线程在出现密码提示时自动输入；
+    // 不再依赖 sshpass（macOS / Windows 通常没有该工具）
     let password = crate::core::get_password(&state, &alias);
-    let mut cmd = if let Some(pw) = password {
-        let mut c = CommandBuilder::new("sshpass");
-        c.arg("-e");
-        c.arg("ssh");
-        c.env("SSHPASS", pw);
-        c
-    } else {
-        CommandBuilder::new("ssh")
-    };
+    let mut cmd = CommandBuilder::new("ssh");
     // 首次连接自动接受 host key（与添加主机时的"信任主机"一致）
     cmd.arg("-o");
     cmd.arg("StrictHostKeyChecking=accept-new");
@@ -81,23 +74,40 @@ pub fn ssh_terminal_open(
         .master
         .try_clone_reader()
         .map_err(|e| format!("读取 PTY 失败: {}", e))?;
-    let writer = pair
-        .master
-        .take_writer()
-        .map_err(|e| format!("写入 PTY 失败: {}", e))?;
+    let writer: Arc<Mutex<Box<dyn Write + Send>>> = Arc::new(Mutex::new(
+        pair.master
+            .take_writer()
+            .map_err(|e| format!("写入 PTY 失败: {}", e))?,
+    ));
 
     let id = format!("term-{}", chrono::Local::now().timestamp_millis());
     let id_thread = id.clone();
     let app_thread = app.clone();
+    let writer_thread = writer.clone();
 
-    // 读取线程：PTY 输出 → 前端事件
+    // 读取线程：PTY 输出 → 前端事件；首次出现密码提示时自动输入保存的密码
     std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
+        let mut pw_sent = false;
+        let mut seen = String::new();
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
                     let data = String::from_utf8_lossy(&buf[..n]).to_string();
+                    if let Some(pw) = password.as_deref() {
+                        if !pw_sent {
+                            seen.push_str(&data);
+                            let low = seen.to_lowercase();
+                            if low.contains("password:") || low.contains("password for") {
+                                if let Ok(mut w) = writer_thread.lock() {
+                                    let _ = w.write_all(format!("{}\n", pw).as_bytes());
+                                    let _ = w.flush();
+                                }
+                                pw_sent = true;
+                            }
+                        }
+                    }
                     let _ = app_thread.emit(
                         "ssh-terminal-output",
                         TermOutput {
@@ -137,12 +147,12 @@ pub fn ssh_terminal_write(
     id: String,
     data: String,
 ) -> Result<(), String> {
-    let mut map = mgr.0.lock().unwrap();
-    let s = map.get_mut(&id).ok_or("终端会话不存在")?;
-    s.writer
-        .write_all(data.as_bytes())
+    let map = mgr.0.lock().unwrap();
+    let s = map.get(&id).ok_or("终端会话不存在")?;
+    let mut w = s.writer.lock().map_err(|e| e.to_string())?;
+    w.write_all(data.as_bytes())
         .map_err(|e| format!("写入失败: {}", e))?;
-    s.writer.flush().map_err(|e| e.to_string())
+    w.flush().map_err(|e| e.to_string())
 }
 
 /// 窗口尺寸变化 → PTY 调整（让 vim/htop 等全屏程序正确渲染）

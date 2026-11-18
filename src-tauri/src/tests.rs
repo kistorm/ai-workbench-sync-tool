@@ -737,3 +737,30 @@ fn it_extract_changelog_section() {
     // 空段落（标题后无内容）→ None
     assert!(extract_changelog_section("## v1.0.0\n\n## v0.9.0\n- x\n", "1.0.0").is_none());
 }
+
+#[test]
+fn it_basic_ssh_config_fallback() {
+    let (state, base) = test_state("basic-ssh-config");
+    let dir = base.join("ssh");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("assh.yml"),
+        "hosts:\n  web:\n    hostname: 203.0.113.10\n    user: deploy\n    port: 2222\n    identityfile: ~/.ssh/id_demo\n    stricthostkeychecking: accept-new\n  db:\n    hostname: 203.0.113.20\ndefaults:\n  port: 22\n  serveraliveinterval: 60\n",
+    )
+    .unwrap();
+    let msg = crate::ssh::build_basic_ssh_config(&state, &dir).expect("基础生成应成功");
+    assert!(msg.contains("基础模式"));
+    let cfg = fs::read_to_string(dir.join("config")).unwrap();
+    assert!(cfg.contains("Host web"));
+    assert!(cfg.contains("HostName 203.0.113.10"));
+    assert!(cfg.contains("User deploy"));
+    assert!(cfg.contains("Port 2222"));
+    assert!(cfg.contains("IdentityFile ~/.ssh/id_demo"));
+    assert!(cfg.contains("StrictHostKeyChecking accept-new"));
+    assert!(cfg.contains("Host db"));
+    assert!(cfg.contains("Host *"));
+    assert!(cfg.contains("ServerAliveInterval 60"));
+    // 不应包含需要 assh 的 ProxyCommand 配置行（注释里提到关键词不算）
+    assert!(!cfg.lines().any(|l| l.trim_start().starts_with("ProxyCommand")));
+    let _ = fs::remove_dir_all(&base);
+}

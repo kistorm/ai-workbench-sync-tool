@@ -2,6 +2,15 @@
 
 所有显著变更都会记录在本文件。格式参考 [Keep a Changelog](https://keepachangelog.com/)，版本遵循语义化版本。
 
+## v0.2.8 (2026-11-18)
+
+### 修复
+
+- **macOS 看不到同步过来的 SSH 密码**：本地 `secrets.json` 缺失时，打开 SSH 页会自动从仓库的 `encrypted/secrets.json.enc` 用主密码解密还原（权限 600）
+- **macOS 无法测试连通性**：常规主机改为直接 `user@host -p 端口` 连接，不再依赖 `~/.ssh/config` 别名解析（macOS 未装 assh 也能测）；密码认证改用内置 PTY 自动输入，**无需安装 sshpass**
+- **macOS 未安装 assh 时无法生成 `~/.ssh/config`**：新增内置基础生成器，直接从 `assh.yml` 生成标准 config（主机/端口/用户/密钥/模板默认值/StrictHostKeyChecking）；跳板机（gateways）仍需安装 assh
+- 内嵌终端的密码主机同样改为内置 PTY 自动输入，不再依赖 sshpass
+
 ## v0.2.7 (2026-11-18)
 
 ### 说明

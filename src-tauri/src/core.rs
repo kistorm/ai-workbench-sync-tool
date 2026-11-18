@@ -436,6 +436,48 @@ fn load_secrets(state: &AppState) -> serde_json::Map<String, serde_json::Value> 
         .unwrap_or_default()
 }
 
+/// 本地密码库缺失时，从仓库里的 encrypted/secrets.json.enc 自动解密还原。
+/// 场景：macOS / Windows 恢复模式后 secrets.json 尚未写入（或旧版本恢复过），
+/// 打开 SSH 页查看密码时按需自愈；已存在则不重复解密。
+pub fn ensure_secrets_restored(state: &AppState) {
+    let path = secrets_path(state);
+    if path.exists() {
+        return;
+    }
+    let cfg = state.cfg();
+    if cfg.encrypt_password.is_empty() {
+        return;
+    }
+    let repo = crate::sync::config_repo_dir();
+    let enc = repo.join("encrypted").join("secrets.json.enc");
+    if !enc.is_file() {
+        return;
+    }
+    let Ok(salt) = fs::read(repo.join(".enc_salt")) else {
+        return;
+    };
+    let Ok(blob) = fs::read(&enc) else {
+        return;
+    };
+    let key = crate::crypto::derive_batch_key(&cfg.encrypt_password, &salt);
+    match crate::crypto::decrypt_with_key(&key, &blob) {
+        Ok(plain) => {
+            if let Some(parent) = path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            if fs::write(&path, &plain).is_ok() {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+                }
+                state.log("sync", "已恢复主机密码库", "来自 encrypted/secrets.json.enc");
+            }
+        }
+        Err(e) => state.log("error", "密码库自动解密失败", &e),
+    }
+}
+
 /// 保存某主机的密码（仅存本地 app_data，权限 600，不进 git）
 pub fn save_password(state: &AppState, alias: &str, password: &str) -> Result<(), String> {
     let mut map = load_secrets(state);
@@ -455,6 +497,7 @@ pub fn save_password(state: &AppState, alias: &str, password: &str) -> Result<()
 }
 
 pub fn get_password(state: &AppState, alias: &str) -> Option<String> {
+    ensure_secrets_restored(state);
     load_secrets(state)
         .get(alias)
         .and_then(|v| v.as_str())

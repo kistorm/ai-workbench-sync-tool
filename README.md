@@ -183,7 +183,8 @@ Launching the app for the first time opens the onboarding screen:
 - **Add host**: `+ Add host` → alias / address / user / port / auth (key or password) / trust host
 - **Edit**: select a host → `Edit connection` — alias, address, user, port, trust; unlisted fields (`inherit`, `identityfile`) are preserved
 - **Password**: `View / change password`; when a master password is set the vault syncs (encrypted) and passwords are viewable after recovery
-- **Test**: `Test connectivity` — uses `sshpass` when a password exists
+- **Test**: `Test connectivity` — regular hosts are dialed directly (`user@host:port`, independent of the assh-generated config); passwords are typed via a built-in PTY, so **sshpass is not required**
+- **Works without assh on macOS**: if assh is missing, a built-in generator writes a standard `~/.ssh/config` (hosts/ports/users/keys/template defaults); jump-host (gateways) support still needs assh
 - **⇡ Push to repo**: encrypts & pushes only `assh.yml` + the password vault (notes/AI untouched); merges remote first (local-preferred) and retries 3 times on failure
 - **⇣ Restore from cloud**: fetches `encrypted/assh.yml.enc`, decrypts it with the master password (plain repos supported too), then rebuilds `~/.ssh/config` and refreshes the host list; notes/AI data untouched
 - **Regenerate config**: writes standard `~/.ssh/config` from `assh.yml` (also runs automatically after add/edit/delete)
