@@ -231,13 +231,21 @@ Launching the app for the first time opens the onboarding screen:
 - Artifacts: Windows `.msi` / `.exe`, macOS `.dmg`, Ubuntu `.deb` / `.AppImage`, plus Source code (zip / tar.gz) archives
 - Upgrade path: Settings → `Check update` → `⇣ Download vX` → install over the existing app
 
-**macOS package**: the Release provides a single **universal build** `nexus-workbench_x.y.z_universal.dmg` that runs on both Intel and Apple Silicon (M1/M2/M3/M4) — no need to pick a chip. Requires macOS 12 Monterey or later. **If the first launch says “the app is damaged” or “cannot verify the developer”**, that is the expected Gatekeeper prompt for a non-notarized app (not real corruption). Use either fix:
+**macOS package**: the Release provides two **universal builds** (one binary for Intel and Apple Silicon):
+
+| File | How to use |
+|---|---|
+| `nexus-workbench_x.y.z_macos-universal.zip` | **Recommended**: unzip, double-click `install-macos.command` — it clears the quarantine flag, installs to /Applications and launches (if blocked: right-click → Open) |
+| `nexus-workbench_x.y.z_universal.dmg` | Drag to Applications, then run one of the commands below |
+
+Requires macOS 12 Monterey or later. **The app is not notarized, so the first launch after downloading will show “the app is damaged” or “cannot verify the developer” (it is not actually damaged)**:
 
 ```bash
-# Option 1: clear the quarantine flag, then open normally
+# Already in Applications: clear quarantine, then open normally
 xattr -cr "/Applications/nexus-workbench.app"
 
-# Option 2: right-click the app in Finder → Open → Open again
+# Or clear quarantine on the downloaded dmg first, then mount and install
+xattr -cr ~/Downloads/nexus-workbench_*_universal.dmg
 ```
 
 ### Themes & Name

@@ -2,6 +2,19 @@
 
 所有显著变更都会记录在本文件。格式参考 [Keep a Changelog](https://keepachangelog.com/)，版本遵循语义化版本。
 
+## v0.2.4 (2026-11-18)
+
+### 新增
+
+- macOS 额外提供 `nexus-workbench_<版本>_macos-universal.zip`：内含 `.app` 与 `install-macos.command` 一键安装脚本（自动解除 Gatekeeper 隔离、安装到 /Applications 并启动）
+
+### 说明
+
+- macOS 未做 Apple 公证，从浏览器下载后首次运行会被 Gatekeeper 拦截并提示「文件已损坏」（并非真的损坏，二进制已校验为 universal：x86_64 minos 10.13 / arm64 minos 11.0）
+  - 推荐：下载 zip → 解压 → 双击 `install-macos.command`（如被拦截，右键 →「打开」）
+  - 或下载 dmg 后执行：`xattr -cr /Applications/nexus-workbench.app` 再打开
+  - 或对 dmg 本身：`xattr -cr ~/Downloads/nexus-workbench_<版本>_universal.dmg`
+
 ## v0.2.3 (2026-11-18)
 
 ### 修复

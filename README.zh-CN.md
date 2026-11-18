@@ -228,13 +228,21 @@ pnpm tauri build        # 打包（.deb / AppImage / dmg / exe）
 - 产物：Windows `.msi` / `.exe`、macOS `.dmg`、Ubuntu `.deb` / `.AppImage`，以及 Source code（zip / tar.gz）源码包
 - 升级路径：设置页「检查更新」→「⇣ 前往下载」→ 安装覆盖
 
-**macOS 选包**：Release 里只提供一个 **通用包** `nexus-workbench_x.y.z_universal.dmg`，Intel 与 Apple Silicon（M1/M2/M3/M4）通用，无需分辨芯片。macOS 12 Monterey 及以上可用。**首次打开若提示「文件已损坏」或「无法验证开发者」**，这是未做 Apple 公证的提示（并非真的损坏），任选一种方式打开：
+**macOS 选包**：Release 提供两个 **通用包**（Intel 与 Apple Silicon 二合一，无需分辨芯片）：
+
+| 文件 | 用法 |
+|---|---|
+| `nexus-workbench_x.y.z_macos-universal.zip` | **推荐**：解压后双击 `install-macos.command`，自动解除隔离、安装到 /Applications 并启动（若被拦截：右键 →「打开」） |
+| `nexus-workbench_x.y.z_universal.dmg` | 拖入「应用程序」后，执行下面任一命令 |
+
+macOS 12 Monterey 及以上可用。**未做 Apple 公证，浏览器下载后首次运行会提示「文件已损坏」或「无法验证开发者」（并非真的损坏）**：
 
 ```bash
-# 方式一：解除隔离标记后正常双击打开
+# 已拖进「应用程序」：解除隔离后正常双击
 xattr -cr "/Applications/nexus-workbench.app"
 
-# 方式二：在 Finder 里右键点击应用 →「打开」→ 再点「打开」
+# 或先对下载的 dmg 本身解除隔离，再挂载安装
+xattr -cr ~/Downloads/nexus-workbench_*_universal.dmg
 ```
 
 ### 主题与名称

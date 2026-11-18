@@ -85,7 +85,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "NEXUS Workbench ${{ github.ref_name }}"
-          releaseBody: "安装包：Windows（.msi/.exe）、macOS 通用包（Intel + Apple Silicon，universal.dmg）、Ubuntu（.deb/.AppImage）。源码包见下方 Source code。更新说明见 CHANGELOG.md。"
+          releaseBody: "安装包：Windows（.msi/.exe）、macOS 通用包（universal.dmg 或 macos-universal.zip，含一键安装脚本）、Ubuntu（.deb/.AppImage）。源码包见下方 Source code。更新说明见 CHANGELOG.md。"
           releaseDraft: false
           prerelease: false
           projectPath: "."
@@ -101,6 +101,48 @@ jobs:
             cat CHANGELOG.md
           } > release-body.md
           git archive --format=tar.gz -o source-${{ github.ref_name }}.tar.gz HEAD
+
+      # 仅 macOS：额外产出 .app.zip + 一键安装脚本（自动解除 quarantine）
+      # 未做 Apple 公证的应用从浏览器下载后会被 Gatekeeper 报「文件已损坏」，
+      # .app.zip 里的 install-macos.command 会自动 xattr -cr 并安装到 /Applications
+      - name: 打包 macOS .app.zip 与一键安装脚本
+        if: startsWith(matrix.platform, 'macos')
+        run: |
+          APP="src-tauri/target/universal-apple-darwin/release/bundle/macos/nexus-workbench.app"
+          echo "== 校验签名 =="
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          echo "== 校验架构 =="
+          lipo -archs "$APP/Contents/MacOS/nexus-workbench"
+          VER="${GITHUB_REF_NAME#v}"
+          STAGE="macos-pkg/nexus-workbench"
+          mkdir -p "$STAGE"
+          cp -R "$APP" "$STAGE/"
+          cat > "$STAGE/install-macos.command" <<'SH'
+          #!/bin/bash
+          set -e
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          APP="$DIR/nexus-workbench.app"
+          echo "→ 解除隔离标记（避免“文件已损坏”提示）..."
+          xattr -cr "$APP"
+          echo "→ 安装到 /Applications ..."
+          rm -rf "/Applications/nexus-workbench.app"
+          cp -R "$APP" "/Applications/nexus-workbench.app"
+          xattr -cr "/Applications/nexus-workbench.app"
+          echo "→ 启动 NEXUS Workbench ..."
+          open "/Applications/nexus-workbench.app"
+          echo "完成。"
+          SH
+          chmod +x "$STAGE/install-macos.command"
+          ditto -c -k --keepParent "$STAGE" "nexus-workbench_${VER}_macos-universal.zip"
+
+      - name: 上传 macOS zip 到 Release
+        if: startsWith(matrix.platform, 'macos')
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: nexus-workbench_*_macos-universal.zip
 
       # tauri-action 已按 tag 创建 Release；softprops 检测到同名 Release 时
       # 追加 assets 并用 body_path 覆盖正文为完整更新日志
