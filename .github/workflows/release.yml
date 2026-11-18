@@ -27,8 +27,8 @@ jobs:
           - platform: windows-latest
             args: ""
           # macOS 通用二进制：同时包含 Intel(x86_64) 与 Apple Silicon(aarch64)，
-          # 一个 DMG 通吃两种芯片（GitHub 对多个 macOS job 有容量限制，单 job 最稳）
-          - platform: macos-14
+          # 一个 DMG 通吃两种芯片（macos-14 镜像已下线，用 macos-latest）
+          - platform: macos-latest
             args: --target universal-apple-darwin
 
     runs-on: ${{ matrix.platform }}
@@ -53,7 +53,7 @@ jobs:
 
       # macOS 通用包：arm64 运行器需要额外装 x86_64 target（aarch64 是默认）
       - name: 添加 macOS 双架构 target
-        if: matrix.platform == 'macos-14'
+        if: startsWith(matrix.platform, 'macos')
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
 
       # Rust 端在 src-tauri/，仓库根没有 Cargo.toml，需显式指定 workspace

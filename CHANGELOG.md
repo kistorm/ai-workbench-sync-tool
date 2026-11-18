@@ -2,11 +2,12 @@
 
 所有显著变更都会记录在本文件。格式参考 [Keep a Changelog](https://keepachangelog.com/)，版本遵循语义化版本。
 
-## v0.2.2 (2026-11-18)
+## v0.2.3 (2026-11-18)
 
 ### 修复
 
 - **macOS 安装包改为通用二进制（Universal）**：一个 `universal.dmg` 同时包含 Intel（x86_64）与 Apple Silicon（aarch64），Intel Mac 与 M 系列芯片均可运行；此前只产出 arm64 包，Intel Mac 无法运行
+- macOS 构建 runner 修正为 `macos-latest`（`macos-14` 镜像已下线，导致 job 被取消）
 - macOS 安装包启用 ad-hoc 签名，减少「文件已损坏」误报；未公证的应用首次打开请右键 →「打开」，或执行 `xattr -cr /Applications/nexus-workbench.app`
 
 ## v0.2.0 (2026-11-18)
