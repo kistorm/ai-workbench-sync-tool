@@ -224,9 +224,25 @@ pnpm tauri build        # 打包（.deb / AppImage / dmg / exe）
 
 ### 安装包与 Release
 
-- 推送 `v*` tag（如 `v0.2.0`）后，GitHub Actions 自动在 Windows / macOS / Ubuntu 三平台构建并发布 Release
-- 产物：Windows `.msi` / `.exe`、macOS `.dmg` / `.app`、Ubuntu `.deb` / `.AppImage`，以及 Source code（zip / tar.gz）源码包
+- 推送 `v*` tag（如 `v0.2.1`）后，GitHub Actions 自动在 Windows / macOS（双架构）/ Ubuntu 构建并发布 Release
+- 产物：Windows `.msi` / `.exe`、macOS `.dmg`、Ubuntu `.deb` / `.AppImage`，以及 Source code（zip / tar.gz）源码包
 - 升级路径：设置页「检查更新」→「⇣ 前往下载」→ 安装覆盖
+
+**macOS 下载哪个包？**
+
+| 你的 Mac | 下载 |
+|---|---|
+| Intel 芯片（2020 年前机型，「关于本机」显示处理器为 Intel） | `nexus-workbench_x.y.z_x64.dmg` |
+| Apple Silicon（M1/M2/M3/M4，「关于本机」显示芯片为 Apple M 系列） | `nexus-workbench_x.y.z_aarch64.dmg` |
+
+macOS 12 Monterey 及以上可用。**首次打开若提示「文件已损坏」或「无法验证开发者」**，这是未做 Apple 公证的提示（并非真的损坏），任选一种方式打开：
+
+```bash
+# 方式一：解除隔离标记后正常双击打开
+xattr -cr "/Applications/nexus-workbench.app"
+
+# 方式二：在 Finder 里右键点击应用 →「打开」→ 再点「打开」
+```
 
 ### 主题与名称
 

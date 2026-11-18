@@ -2,6 +2,13 @@
 
 所有显著变更都会记录在本文件。格式参考 [Keep a Changelog](https://keepachangelog.com/)，版本遵循语义化版本。
 
+## v0.2.1 (2026-11-18)
+
+### 修复
+
+- **macOS 安装包区分芯片架构**：同时提供 Intel（`x64.dmg`）与 Apple Silicon（`aarch64.dmg`）两个安装包；此前只产出 arm64 包，Intel Mac 无法运行
+- macOS 安装包启用 ad-hoc 签名，减少「文件已损坏」误报；未公证的应用首次打开请右键 →「打开」，或执行 `xattr -cr /Applications/NEXUS\ Workbench.app`
+
 ## v0.2.0 (2026-11-18)
 
 ### 新增

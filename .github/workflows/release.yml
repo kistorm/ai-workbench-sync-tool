@@ -21,7 +21,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [ubuntu-22.04, windows-latest, macos-latest]
+        include:
+          - platform: ubuntu-22.04
+            target: ""
+            args: ""
+          - platform: windows-latest
+            target: ""
+            args: ""
+          # Apple Silicon（M 系列）
+          - platform: macos-14
+            target: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin
+          # Intel 芯片（macos-14 是 arm64 运行器，交叉编译出 x86_64 包）
+          - platform: macos-14
+            target: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -43,11 +57,17 @@ jobs:
       - name: 安装 Rust stable 工具链
         uses: dtolnay/rust-toolchain@stable
 
+      # macOS 交叉编译：arm64 运行器上额外装 x86_64 target
+      - name: 添加交叉编译 target
+        if: matrix.target != ''
+        run: rustup target add ${{ matrix.target }}
+
       # Rust 端在 src-tauri/，仓库根没有 Cargo.toml，需显式指定 workspace
       - name: 缓存 Rust 编译产物
         uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          key: ${{ matrix.target }}
 
       - name: 安装 Ubuntu 系统依赖（Tauri 2 需要 webkit2gtk-4.1）
         if: matrix.platform == 'ubuntu-22.04'
@@ -60,18 +80,22 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # tauri 项目根即仓库根：tauri-action 读取 src-tauri/tauri.conf.json，
-      # 并执行其 beforeBuildCommand（pnpm build）完成前端构建
+      # 并执行其 beforeBuildCommand（pnpm build）完成前端构建。
+      # APPLE_SIGNING_IDENTITY="-" = ad-hoc 签名：无开发者证书时也能避免
+      # “文件已损坏”提示（用户首次打开仍需右键 → 打开，或执行 xattr -cr）。
       - name: 构建 Tauri 并创建 Release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_SIGNING_IDENTITY: "-"
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "NEXUS Workbench ${{ github.ref_name }}"
-          releaseBody: "安装包：Windows（.msi/.exe）、macOS（.dmg/.app）、Ubuntu（.deb/.AppImage）。源码包见下方 Source code。更新说明见 README。"
+          releaseBody: "安装包：Windows（.msi/.exe）、macOS（Intel：x64.dmg / Apple Silicon：aarch64.dmg）、Ubuntu（.deb/.AppImage）。源码包见下方 Source code。更新说明见 CHANGELOG.md。"
           releaseDraft: false
           prerelease: false
           projectPath: "."
+          args: ${{ matrix.args }}
 
       # 仅 Ubuntu：把 CHANGELOG.md 对应版本段落写成 Release 正文，并打源码包
       - name: 生成更新日志正文
