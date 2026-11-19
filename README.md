@@ -111,7 +111,9 @@ Local Markdown notes with a Markdown / rich-text dual editor.
 - Node.js ≥ 20 + pnpm
 - Rust toolchain (stable)
 - Linux: `libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev patchelf` (Ubuntu 24.04 also needs `libayatana-appindicator3-dev`)
-- Optional: `assh` (SSH config compiler), `sshpass` (password auto-login), `xdotool` + `x11-utils` (bring Electerm to front on Linux)
+- Windows: WebView2 runtime (usually preinstalled on Win10/11), **Git for Windows** (its bash is required for AI session sync), Python 3 (Youdao Note pull)
+- macOS: Xcode Command Line Tools
+- Optional: `assh` (SSH config compiler; needed for jump hosts and regex hosts), `xdotool` + `x11-utils` (bring Electerm to front on Linux)
 
 ### Install & run
 
@@ -217,7 +219,8 @@ Launching the app for the first time opens the onboarding screen:
 
 - **Settings → Sync repo**: push / pull / force restore / init repo
 - **Scheduled sync**: set interval (minutes) and click `Install/Update` — writes a crontab entry running `auto-sync.sh` (SSH config + notes + AI sessions)
-- **In-app timer** runs when crontab is not installed
+- **Windows has no crontab**: the install button is hidden and the **in-app timer** is used instead (keep the app running)
+- **In-app timer** also runs when crontab is not installed; it skips a round while a sync is already running
 - **Sync log**: view the tail of the background sync log
 
 ### System & Update (Settings page)

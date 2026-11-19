@@ -907,7 +907,6 @@ pub async fn push_ssh_config(state: State<'_, AppState>) -> Result<String, Strin
             Ok(r) if r.combined().contains("nothing to commit") => "无变化".to_string(),
             Ok(r) => return Err(format!("提交失败：{}", r.combined())),
             Err(e) => return Err(format!("提交失败: {}", e)),
-            _ => unreachable!(),
         };
 
         let ssh_env = crate::sync::git_ssh_env(&st);
@@ -1407,10 +1406,14 @@ fn electerm_candidates(state: &AppState) -> Vec<(String, &'static str)> {
         let p = expand_tilde(&cfg.electerm_cmd);
         v.push((p.to_string_lossy().to_string(), "config"));
     }
-    // 2. PATH 中的命令
-    if let Ok(r) = run_cmd("which", &["electerm"], &[]) {
+    // 2. PATH 中的命令（Windows 用 where，可能返回多行，取第一行）
+    #[cfg(target_os = "windows")]
+    let finder = "where";
+    #[cfg(not(target_os = "windows"))]
+    let finder = "which";
+    if let Ok(r) = run_cmd(finder, &["electerm"], &[]) {
         if r.ok {
-            let p = r.stdout.trim().to_string();
+            let p = r.stdout.lines().next().unwrap_or("").trim().to_string();
             if !p.is_empty() {
                 v.push((p, "path"));
             }
@@ -1544,7 +1547,10 @@ fn electerm_version(path: &str, source: &str) -> String {
             &[
                 "-NoProfile",
                 "-Command",
-                &format!("(Get-Item '{}').VersionInfo.ProductVersion", path),
+                &format!(
+                    "(Get-Item '{}').VersionInfo.ProductVersion",
+                    path.replace('\'', "''")
+                ),
             ],
             &[],
         ) {

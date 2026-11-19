@@ -255,6 +255,20 @@ pub async fn ai_sync_run(state: State<'_, AppState>, action: String) -> Result<S
             let _ = crate::sync::sync_data_repo(&st, "pull");
         }
 
+        // Windows 依赖 Git for Windows 提供的 bash 执行 sync.sh
+        #[cfg(target_os = "windows")]
+        {
+            let has_bash = crate::core::run_cmd("bash", &["--version"], &[])
+                .map(|r| r.ok)
+                .unwrap_or(false);
+            if !has_bash {
+                st.clear_running();
+                return Err(
+                    "Windows 上 AI 会话同步需要 Git for Windows 提供的 bash，请安装 Git 后重启应用"
+                        .into(),
+                );
+            }
+        }
         // AI_SYNC_REPO 指定收集目录；统一模式下脚本只收集，不自推
         let res = run_cmd_dir(
             "bash",

@@ -129,11 +129,31 @@ fn ensure_project(state: &AppState) -> Result<PathBuf, String> {
 
     let py = venv_python(&dir);
     if !py.exists() {
-        let r = run_cmd("python3", &["-m", "venv", &dir.join("venv").to_string_lossy()], &[])?;
-        if !r.ok {
+        let venv_arg = dir.join("venv").to_string_lossy().to_string();
+        // Windows 上解释器通常叫 python / py，Linux/macOS 才是 python3
+        #[cfg(target_os = "windows")]
+        let attempts: Vec<(&str, Vec<&str>)> = vec![
+            ("python", vec!["-m", "venv", venv_arg.as_str()]),
+            ("py", vec!["-3", "-m", "venv", venv_arg.as_str()]),
+        ];
+        #[cfg(not(target_os = "windows"))]
+        let attempts: Vec<(&str, Vec<&str>)> = vec![("python3", vec!["-m", "venv", venv_arg.as_str()])];
+        let mut ok = false;
+        let mut last_err = String::new();
+        for (cmd, args) in attempts {
+            match run_cmd(cmd, &args, &[]) {
+                Ok(r) if r.ok => {
+                    ok = true;
+                    break;
+                }
+                Ok(r) => last_err = r.combined(),
+                Err(e) => last_err = e,
+            }
+        }
+        if !ok {
             return Err(format!(
-                "创建 Python 虚拟环境失败（需要 python3-venv）: {}",
-                r.combined()
+                "创建 Python 虚拟环境失败（Windows 需安装 Python 3；Linux 需要 python3-venv）: {}",
+                last_err
             ));
         }
     }

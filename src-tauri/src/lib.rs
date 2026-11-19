@@ -55,9 +55,11 @@ pub fn run() {
                         Some(t) => t.elapsed() >= interval,
                         None => last_tick.elapsed() >= interval,
                     };
-                    if due {
-                        last_run = Some(Instant::now());
-                        if !cron_installed {
+                    if due && !cron_installed {
+                        // 用户正在同步时跳过这一轮，避免并发写仓库
+                        let busy = st.running.lock().map(|r| r.active).unwrap_or(false);
+                        if !busy {
+                            last_run = Some(Instant::now());
                             let st2 = st.clone();
                             std::thread::spawn(move || {
                                 let _ = sync::run_sync_all_blocking(&st2, "push");

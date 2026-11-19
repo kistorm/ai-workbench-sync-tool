@@ -1,4 +1,6 @@
-use crate::core::{expand_tilde, home, run_cmd, AppState};
+use crate::core::{expand_tilde, home, AppState};
+#[cfg(not(target_os = "windows"))]
+use crate::core::run_cmd;
 use serde::Serialize;
 use std::fs;
 use std::io::Write;
@@ -88,6 +90,12 @@ echo "[$(date -Is)] ===== auto sync end =====" >> "$LOG"
     Ok(script_path)
 }
 
+#[cfg(target_os = "windows")]
+pub(crate) fn read_crontab() -> String {
+    String::new()
+}
+
+#[cfg(not(target_os = "windows"))]
 pub(crate) fn read_crontab() -> String {
     run_cmd("crontab", &["-l"], &[])
         .ok()
@@ -131,7 +139,15 @@ pub(crate) fn strip_nexus_lines(content: &str) -> String {
 }
 
 /// 安装/更新定时同步任务（核心逻辑，可测试）
+#[cfg_attr(target_os = "windows", allow(unreachable_code))]
 pub fn cron_install_impl(state: &AppState, interval_min: u32) -> Result<CronStatus, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = (state, interval_min);
+        return Err(
+            "Windows 不支持 crontab 定时任务；请开启应用内定时器（保持应用运行即可）".into(),
+        );
+    }
     if interval_min == 0 {
         return Err("间隔必须大于 0 分钟".into());
     }
@@ -238,7 +254,26 @@ pub fn cron_status(state: State<AppState>) -> CronStatus {
 }
 
 /// 移除定时任务（核心逻辑，可测试）
+#[cfg_attr(target_os = "windows", allow(unreachable_code))]
 pub fn cron_remove_impl(state: &AppState) -> Result<CronStatus, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let mut cfg = state.config.lock().unwrap();
+        cfg.auto_sync_enabled = false;
+        let c = cfg.clone();
+        drop(cfg);
+        state.save_config(&c)?;
+        return Ok(CronStatus {
+            installed: false,
+            interval: None,
+            line: String::new(),
+            script_path: state
+                .data_dir
+                .join("auto-sync.sh")
+                .to_string_lossy()
+                .to_string(),
+        });
+    }
     let existing = read_crontab();
     let cleaned = strip_nexus_lines(&existing);
     let mut new_content = cleaned.trim_end().to_string();

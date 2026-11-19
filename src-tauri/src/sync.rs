@@ -23,11 +23,10 @@ fn ssh_command(key: &str) -> String {
     if key.is_empty() {
         format!("ssh {}", common)
     } else {
-        format!(
-            "ssh -i {} -o IdentitiesOnly=yes {}",
-            expand_tilde(key).display(),
-            common
-        )
+        // Git 在 Windows 上通过 sh 解析 GIT_SSH_COMMAND：反斜杠会被当转义符吃掉，
+        // 路径含空格也会被拆开。统一转正斜杠并加引号，macOS/Linux 加引号同样安全。
+        let p = expand_tilde(key).to_string_lossy().replace('\\', "/");
+        format!("ssh -i \"{}\" -o IdentitiesOnly=yes {}", p, common)
     }
 }
 
@@ -1117,4 +1116,19 @@ pub fn init_data_repo(state: State<AppState>) -> Result<String, String> {
     apply_remote(&repo_dir, &cfg.git_repo)?;
     state.log("sync", "已初始化数据仓库", &repo_dir.to_string_lossy());
     Ok(format!("已初始化 {} 并绑定 {}", repo_dir.display(), cfg.git_repo))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ssh_command_quotes_and_normalizes_key_path() {
+        let s = ssh_command("~/.ssh/id_ed25519_github");
+        assert!(s.contains("-i \""), "密钥路径应加引号: {}", s);
+        assert!(s.contains("IdentitiesOnly=yes"));
+        assert!(!s.contains('\\'), "不应包含反斜杠（Windows 会被 sh 吃掉）: {}", s);
+        let empty = ssh_command("");
+        assert!(empty.starts_with("ssh "));
+    }
 }

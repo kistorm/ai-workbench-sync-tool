@@ -110,7 +110,9 @@
 - Node.js ≥ 20 + pnpm
 - Rust 工具链（stable）
 - Linux 依赖：`libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev patchelf`（Ubuntu 24.04 还需 `libayatana-appindicator3-dev`）
-- 可选：`assh`（SSH 配置编译器）、`sshpass`（密码自动登录）、`xdotool` + `x11-utils`（Linux 下把 Electerm 窗口置前）
+- Windows：WebView2 运行时（Win10/11 通常已自带）、**Git for Windows**（AI 会话同步需要其 bash）、Python 3（有道云拉取需要）
+- macOS：Xcode Command Line Tools
+- 可选：`assh`（SSH 配置编译器，跳板机与正则主机需要）、`xdotool` + `x11-utils`（Linux 下把 Electerm 窗口置前）
 
 ### 安装与运行
 
@@ -214,7 +216,8 @@ pnpm tauri build        # 打包（.deb / AppImage / dmg / exe）
 
 - **设置 → 同步仓库**：推送 / 拉取 / 强制恢复 / 初始化仓库
 - **定时同步**：设置间隔（分钟）后点 `安装/更新`，写入 crontab 执行 `auto-sync.sh`（SSH 配置 + 笔记 + AI 会话）
-- 未安装 crontab 时由**应用内定时器**兜底
+- **Windows 不支持 crontab**：设置页会自动隐藏安装按钮，直接使用**应用内定时器**（保持应用运行）
+- 未安装 crontab 时同样由**应用内定时器**兜底；用户正在同步时会自动跳过本轮
 - **同步日志**：查看后台同步日志尾部
 
 ### 系统与升级（设置页）

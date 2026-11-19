@@ -263,6 +263,15 @@ pub async fn notes_git_sync(state: State<'_, AppState>, action: String) -> Resul
         let action = action.to_lowercase();
         let res = match action.as_str() {
             "push" => {
+                // 加密模式：先把明文笔记重新加密，再提交 encrypted/ 下的变更
+                let cfg = st.cfg();
+                if !cfg.encrypt_password.is_empty() {
+                    if let Err(e) =
+                        crate::sync::encrypt_all(&st, &git_root, &cfg.encrypt_password)
+                    {
+                        return Err(format!("加密笔记失败: {}", e));
+                    }
+                }
                 let add = run_cmd_dir("git", &["add", "-A"], &git_root, &[])?;
                 if !add.ok {
                     return Err(add.combined());
@@ -282,6 +291,16 @@ pub async fn notes_git_sync(state: State<'_, AppState>, action: String) -> Resul
                 let r = run_cmd_dir("git", &["pull", "-q", "--rebase", "--autostash", "-X", "ours"], &git_root, &[])?;
                 if !r.ok {
                     return Err(r.combined());
+                }
+                // 加密模式：拉取后解密回明文目录
+                let cfg = st.cfg();
+                if !cfg.encrypt_password.is_empty() {
+                    if let Err(e) =
+                        crate::sync::decrypt_all(&st, &git_root, &cfg.encrypt_password)
+                    {
+                        st.log("error", "解密笔记失败", &e);
+                    }
+                    let _ = crate::sync::sync_repo_ssh_yml_to_local(&st);
                 }
                 r.combined()
             }

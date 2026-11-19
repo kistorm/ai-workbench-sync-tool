@@ -831,7 +831,11 @@ pub fn open_url(url: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let r = run_cmd("open", &[&url], &[])?;
     #[cfg(target_os = "windows")]
-    let r = run_cmd("cmd", &["/C", "start", "", &url], &[])?;
+    let r = {
+        // cmd 会把未加引号的 & 当成命令分隔符，这里整体加引号
+        let safe = url.replace('"', "%22");
+        run_cmd("cmd", &["/C", &format!("start \"\" \"{}\"", safe)], &[])?
+    };
     if !r.ok {
         return Err("打开链接失败".into());
     }

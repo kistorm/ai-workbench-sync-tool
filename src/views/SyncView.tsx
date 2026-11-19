@@ -629,9 +629,15 @@ export function SyncView({ theme, onThemeChange, appName, onAppNameChange }: Syn
                 <div className="h-px bg-white/5" />
                 <div className="flex items-center justify-between">
                   <div>
-                    <div className="text-[13px] text-[var(--color-nexus-text)]">Cron 任务</div>
+                    <div className="text-[13px] text-[var(--color-nexus-text)]">
+                      {sysInfo?.os_type === "Windows" ? "定时同步" : "Cron 任务"}
+                    </div>
                     <div className="font-mono text-[10.5px] text-[var(--color-nexus-text-faint)] mt-0.5">
-                      {cron?.installed ? cron.line : "未安装 · 应用内定时器仍生效"}
+                      {sysInfo?.os_type === "Windows"
+                        ? "Windows 使用应用内定时器（保持应用运行）"
+                        : cron?.installed
+                          ? cron.line
+                          : "未安装 · 应用内定时器仍生效"}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -643,13 +649,17 @@ export function SyncView({ theme, onThemeChange, appName, onAppNameChange }: Syn
                     >
                       {cron?.installed ? "已安装" : "未安装"}
                     </span>
-                    <button className="btn ml-2" disabled={!!busy} onClick={installCron}>
-                      {busy === "cron" ? "安装中…" : "安装/更新"}
-                    </button>
-                    {cron?.installed && (
-                      <button className="btn" onClick={() => setConfirmRemoveCron(true)}>
-                        移除
-                      </button>
+                    {sysInfo?.os_type !== "Windows" && (
+                      <>
+                        <button className="btn ml-2" disabled={!!busy} onClick={installCron}>
+                          {busy === "cron" ? "安装中…" : "安装/更新"}
+                        </button>
+                        {cron?.installed && (
+                          <button className="btn" onClick={() => setConfirmRemoveCron(true)}>
+                            移除
+                          </button>
+                        )}
+                      </>
                     )}
                   </div>
                 </div>

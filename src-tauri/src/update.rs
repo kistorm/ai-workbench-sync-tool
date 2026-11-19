@@ -165,7 +165,7 @@ pub async fn download_update(state: State<'_, AppState>) -> Result<DownloadedUpd
         TOTAL.store(content_length(&url), Ordering::Relaxed);
         set_phase("downloading");
 
-        let mut child = Command::new("curl")
+        let curl_spawn = Command::new("curl")
             .args([
                 "-L",
                 "--fail",
@@ -178,8 +178,44 @@ pub async fn download_update(state: State<'_, AppState>) -> Result<DownloadedUpd
             ])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .spawn()
-            .map_err(|e| format!("启动下载失败: {}", e))?;
+            .spawn();
+        let mut child = match curl_spawn {
+            Ok(c) => c,
+            Err(_) => {
+                // 没有 curl（旧版 Windows）：用 PowerShell 下载
+                #[cfg(target_os = "windows")]
+                {
+                    let ps = format!(
+                        "Invoke-WebRequest -Uri '{}' -OutFile '{}' -UseBasicParsing",
+                        url,
+                        dest.to_string_lossy()
+                    );
+                    let out = Command::new("powershell")
+                        .args(["-NoProfile", "-Command", &ps])
+                        .output()
+                        .map_err(|e| format!("启动下载失败: {}", e))?;
+                    if !out.status.success() {
+                        set_phase("idle");
+                        return Err(format!(
+                            "下载失败: {}",
+                            String::from_utf8_lossy(&out.stderr)
+                        ));
+                    }
+                    if let Ok(md) = fs::metadata(&dest) {
+                        DOWNLOADED.store(md.len(), Ordering::Relaxed);
+                        TOTAL.store(md.len(), Ordering::Relaxed);
+                    }
+                    set_phase("idle");
+                    return Ok(DownloadedUpdate {
+                        version,
+                        asset,
+                        path: dest.to_string_lossy().to_string(),
+                    });
+                }
+                #[cfg(not(target_os = "windows"))]
+                return Err("未找到 curl，无法下载更新".to_string());
+            }
+        };
 
         loop {
             if let Ok(Some(status)) = child.try_wait() {
@@ -294,19 +330,28 @@ open "$TARGET"
     }
     #[cfg(target_os = "windows")]
     {
-        // 静默安装（Tauri NSIS 默认 per-user，无需管理员）
-        let mut cmd = Command::new(path);
-        cmd.arg("/S");
-        cmd.stdin(Stdio::null());
-        cmd.stdout(Stdio::null());
-        cmd.stderr(Stdio::null());
-        cmd.spawn()
+        use std::os::windows::process::CommandExt;
+        // 用批处理：等应用退出 → 静默安装（currentUser，无需管理员）→ 重新启动
+        let bat = std::env::temp_dir().join("nexus-workbench-update.bat");
+        let body = format!(
+            "@echo off\r\ntimeout /t 2 /nobreak >nul\r\nstart /wait \"\" \"{setup}\" /S\r\ntimeout /t 3 /nobreak >nul\r\nif exist \"%LOCALAPPDATA%\\nexus-workbench\\nexus-workbench.exe\" start \"\" \"%LOCALAPPDATA%\\nexus-workbench\\nexus-workbench.exe\"\r\n",
+            setup = path.display()
+        );
+        fs::write(&bat, body).map_err(|e| format!("写入更新脚本失败: {}", e))?;
+        Command::new("cmd")
+            .arg("/C")
+            .arg(&bat)
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
             .map_err(|e| format!("启动安装程序失败: {}", e))?;
         std::thread::spawn(|| {
-            std::thread::sleep(Duration::from_millis(2500));
+            std::thread::sleep(Duration::from_millis(1200));
             std::process::exit(0);
         });
-        Ok("安装程序已启动（静默安装），应用即将退出".into())
+        Ok("安装程序已启动（静默安装），应用即将退出并自动重启".into())
     }
     #[cfg(target_os = "linux")]
     {
