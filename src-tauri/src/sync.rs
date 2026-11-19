@@ -18,7 +18,11 @@ pub struct Diagnosis {
 /// - 指定了密钥：只用该密钥（IdentitiesOnly）
 /// - 未指定密钥：交给系统 SSH 配置 / ssh-agent（首次引导时还没有保存密钥）
 fn ssh_command(key: &str) -> String {
-    let common = "-o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new";
+    // -F /dev/null：不读用户 ~/.ssh/config。
+    // 用户的 config 可能带 assh ProxyCommand / 过期条目，会让应用的网络操作
+    // 超时或失败（例如清理过 assh.yml 后 ProxyCommand 悬空）。应用所需的
+    // 主机覆盖（HostName/Port）由 git_ssh_env 显式给出，完全自包含。
+    let common = "-F /dev/null -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new";
     let key = key.trim();
     if key.is_empty() {
         format!("ssh {}", common)
@@ -26,7 +30,7 @@ fn ssh_command(key: &str) -> String {
         // Git 在 Windows 上通过 sh 解析 GIT_SSH_COMMAND：反斜杠会被当转义符吃掉，
         // 路径含空格也会被拆开。统一转正斜杠并加引号，macOS/Linux 加引号同样安全。
         let p = expand_tilde(key).to_string_lossy().replace('\\', "/");
-        format!("ssh -i \"{}\" -o IdentitiesOnly=yes {}", p, common)
+        format!("ssh -F /dev/null -i \"{}\" -o IdentitiesOnly=yes {}", p, common)
     }
 }
 
@@ -1125,10 +1129,12 @@ mod tests {
     #[test]
     fn ssh_command_quotes_and_normalizes_key_path() {
         let s = ssh_command("~/.ssh/id_ed25519_github");
+        assert!(s.contains("-F /dev/null"), "应绕过用户 ssh 配置: {}", s);
         assert!(s.contains("-i \""), "密钥路径应加引号: {}", s);
         assert!(s.contains("IdentitiesOnly=yes"));
+        assert!(s.contains("ConnectTimeout=15"));
         assert!(!s.contains('\\'), "不应包含反斜杠（Windows 会被 sh 吃掉）: {}", s);
         let empty = ssh_command("");
-        assert!(empty.starts_with("ssh "));
+        assert!(empty.starts_with("ssh -F /dev/null"));
     }
 }
