@@ -34,22 +34,28 @@ fn ssh_command(key: &str) -> String {
     }
 }
 
-/// 供引导等网络 git 操作统一使用：按配置的密钥构造 GIT_SSH_COMMAND 环境变量。
-/// github.com 强制覆盖为 ssh.github.com:443 —— 不依赖 ~/.ssh/config 或 assh.yml
-/// 里的映射条目（用户删除 github.com 主机后同步通道依然可用）。
-pub(crate) fn git_ssh_env(st: &AppState) -> Vec<(&'static str, String)> {
-    let cfg = st.cfg();
-    let repo_host = cfg
-        .git_repo
-        .split('@')
+/// 从 git@host:owner/repo.git 里提取主机名
+fn repo_host(url: &str) -> String {
+    url.split('@')
         .nth(1)
         .and_then(|s| s.split(':').next())
         .unwrap_or("")
-        .to_string();
-    let mut val = ssh_command(&cfg.ssh_key);
+        .to_string()
+}
+
+/// github.com 强制覆盖为 ssh.github.com:443 —— 不依赖 ~/.ssh/config 或 assh.yml
+/// 里的映射条目（用户删除 github.com 主机后同步通道依然可用）。
+fn apply_github_override(mut val: String, repo_host: &str) -> String {
     if repo_host == "github.com" {
         val.push_str(" -o HostName=ssh.github.com -o Port=443");
     }
+    val
+}
+
+/// 供引导等网络 git 操作统一使用：按配置的密钥构造 GIT_SSH_COMMAND 环境变量。
+pub(crate) fn git_ssh_env(st: &AppState) -> Vec<(&'static str, String)> {
+    let cfg = st.cfg();
+    let val = apply_github_override(ssh_command(&cfg.ssh_key), &repo_host(&cfg.git_repo));
     vec![("GIT_SSH_COMMAND", val)]
 }
 
@@ -143,7 +149,11 @@ pub fn diagnose_git_impl(repo: &str, key: &str) -> Result<Diagnosis, String> {
         return Err("未配置 Git 仓库地址".into());
     }
     validate_git_repo_url(repo)?;
-    let env = [("GIT_SSH_COMMAND", ssh_command(key))];
+    // 检测的仓库同样应用 github 443 覆盖（否则 -F /dev/null 后直连 22 端口被墙）
+    let env = [(
+        "GIT_SSH_COMMAND",
+        apply_github_override(ssh_command(key), &repo_host(repo)),
+    )];
     let start = Instant::now();
     let res = run_cmd("git", &["ls-remote", repo], &env);
     let ms = start.elapsed().as_millis() as u64;
