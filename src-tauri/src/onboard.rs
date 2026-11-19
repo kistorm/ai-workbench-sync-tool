@@ -103,10 +103,11 @@ pub async fn onboard(
             active: true,
         });
 
-        // 验证连接（网络抖动时最多重试 2 次）
+        // 验证连接（对 GitHub 链路不稳的网络，最多重试 5 次，等待递增）
         let ls = {
             let mut last = None;
-            for attempt in 1..=3usize {
+            let waits = [2u64, 4, 6, 8];
+            for attempt in 1..=5usize {
                 let r = run_cmd_dir("git", &["ls-remote", "origin"], &repo_dir, &ssh_env);
                 match &r {
                     Ok(res) if res.ok => {
@@ -115,8 +116,8 @@ pub async fn onboard(
                     }
                     _ => {
                         last = Some(r);
-                        if attempt < 3 {
-                            std::thread::sleep(std::time::Duration::from_secs(3));
+                        if attempt < 5 {
+                            std::thread::sleep(std::time::Duration::from_secs(waits[attempt - 1]));
                         }
                     }
                 }
@@ -128,7 +129,7 @@ pub async fn onboard(
             Some(Ok(r)) => {
                 st.clear_running();
                 return Err(format!(
-                    "无法连接仓库（已重试，请检查网络与 SSH 密钥）：\n{}",
+                    "无法连接仓库（已重试 5 次，网络不稳定）：\n{}\n提示：可开启加速服务改善到 GitHub 的连接后重试",
                     first_lines(&r.combined(), 3)
                 ));
             }
@@ -155,15 +156,16 @@ pub async fn onboard(
                 eta: "正在从 Git 仓库下载".into(),
                 active: true,
             });
-            // 网络抖动时自动重试（最多 3 次）
+            // 网络抖动时自动重试（最多 5 次）
             let mut fetch: Result<crate::core::CmdResult, String> = Err("未执行".into());
-            for attempt in 1..=3usize {
+            let fetch_waits = [3u64, 5, 8, 10];
+            for attempt in 1..=5usize {
                 st.set_running(RunningAction {
                     title: "恢复模式".into(),
                     subtitle: if attempt == 1 {
                         "拉取云端内容…".into()
                     } else {
-                        format!("拉取云端内容…（第 {} 次重试）", attempt)
+                        format!("拉取云端内容…（第 {} 次重试 / 共 5 次）", attempt)
                     },
                     progress: 15,
                     eta: "正在从 Git 仓库下载".into(),
@@ -196,8 +198,8 @@ pub async fn onboard(
                 if ok_now {
                     break;
                 }
-                if attempt < 3 {
-                    std::thread::sleep(std::time::Duration::from_secs(3));
+                if attempt < 5 {
+                    std::thread::sleep(std::time::Duration::from_secs(fetch_waits[attempt - 1]));
                 }
             }
             let fetch = match fetch {
@@ -209,7 +211,10 @@ pub async fn onboard(
             };
             if !fetch.ok {
                 st.clear_running();
-                return Err(format!("拉取失败（已重试 3 次）：\n{}", first_lines(&fetch.combined(), 6)));
+                return Err(format!(
+                    "拉取失败（已重试 5 次，网络不稳定）：\n{}\n提示：可开启加速服务改善到 GitHub 的连接后重试",
+                    first_lines(&fetch.combined(), 6)
+                ));
             }
             let branch = current_branch(&repo_dir);
             let mut target = format!("origin/{}", branch);
@@ -428,9 +433,10 @@ pub async fn onboard(
             });
             // 远程已验证为空（无引用或空树），本地重建的历史需要强制覆盖；
             // GitHub 等平台不允许真正零引用的仓库，普通推送会被 (fetch first) 拒绝。
-            // 网络抖动（如 assh 通道拨号超时）时自动重试，最多 3 次。
+            // 网络抖动（如 assh 通道拨号超时）时自动重试，最多 5 次。
             let mut push_final: Option<Result<crate::core::CmdResult, String>> = None;
-            for attempt in 1..=3usize {
+            let push_waits = [3u64, 5, 8, 10];
+            for attempt in 1..=5usize {
                 st.set_running(RunningAction {
                     title: "全新模式".into(),
                     subtitle: if attempt == 1 {
@@ -474,9 +480,9 @@ pub async fn onboard(
                     push_final = Some(r);
                     break;
                 }
-                if attempt < 3 {
+                if attempt < 5 {
                     let _ = failed; // 记录在最后一次失败时统一报错
-                    std::thread::sleep(std::time::Duration::from_secs(3));
+                    std::thread::sleep(std::time::Duration::from_secs(push_waits[attempt - 1]));
                 } else {
                     push_final = Some(r);
                 }
@@ -492,7 +498,7 @@ pub async fn onboard(
             if !push.ok {
                 st.clear_running();
                 return Err(format!(
-                    "推送失败（已重试 3 次，网络不稳定）：\n{}",
+                    "推送失败（已重试 5 次，网络不稳定）：\n{}\n提示：可开启加速服务改善到 GitHub 的连接后重试",
                     first_lines(&push.combined(), 6)
                 ));
             }
