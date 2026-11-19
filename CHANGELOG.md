@@ -27,6 +27,7 @@
 
 ### 修复
 
+- **应用内网络操作不再读用户 `~/.ssh/config`**：`GIT_SSH_COMMAND` 加 `-F /dev/null` 完全自包含。修复清理 `assh.yml` 后 ProxyCommand 悬空导致的「连接超时」；连接超时从 8s 放宽到 15s
 - **SSH 页「⇣ 从云端恢复」没有恢复主机密码库**：此前只恢复 `assh.yml`，跨机器（如 Ubuntu 推送 → Mac 恢复）后主机有了、密码却没有。现在会同时取回 `encrypted/secrets.json.enc` 解密并写入本地（权限 600），成功提示会显示恢复的密码条数
 - **应用内网络操作不再读用户 `~/.ssh/config`**：`GIT_SSH_COMMAND` 加 `-F /dev/null` 完全自包含。修复清理 `assh.yml` 后 ProxyCommand 悬空导致的「连接超时」；连接超时从 8s 放宽到 15s
 - 密码库自动自愈支持「空文件」状态（旧版本可能留下 `{}`），打开 SSH 页即会从云端补回
