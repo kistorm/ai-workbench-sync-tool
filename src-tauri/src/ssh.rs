@@ -1129,6 +1129,43 @@ pub async fn force_pull_ssh_config(state: State<'_, AppState>) -> Result<String,
             note = "（已解密）".to_string();
         }
 
+        // SSH 单独恢复也要把主机密码库一起拉下来（encrypted/secrets.json.enc）
+        let mut secrets_note = String::new();
+        let has_secrets_enc = run_cmd(
+            "git",
+            &[
+                "-C",
+                &repo_str,
+                "cat-file",
+                "-e",
+                &format!("{}:encrypted/secrets.json.enc", target),
+            ],
+            &[],
+        )
+        .map(|r| r.ok)
+        .unwrap_or(false);
+        if has_secrets_enc {
+            let restore_secrets = run_cmd(
+                "git",
+                &[
+                    "-C",
+                    &repo_str,
+                    "restore",
+                    "--source",
+                    &target,
+                    "--worktree",
+                    "encrypted/secrets.json.enc",
+                ],
+                &[],
+            )?;
+            if !restore_secrets.ok {
+                return Err(format!("恢复密码库失败: {}", restore_secrets.combined()));
+            }
+            let n = crate::sync::restore_secrets_from_repo(&st)
+                .map_err(|e| format!("恢复密码库失败：{}", e))?;
+            secrets_note = format!("，密码库 {} 条", n);
+        }
+
         // 重建 ~/.ssh/config 使恢复的配置立即生效
         // mac/Windows：仓库与 ~/.ssh 的 assh.yml 是独立文件，恢复后必须同步
         let _ = crate::sync::sync_repo_ssh_yml_to_local(&st);
@@ -1136,9 +1173,12 @@ pub async fn force_pull_ssh_config(state: State<'_, AppState>) -> Result<String,
         st.log(
             "sync",
             "已从云端恢复 SSH 配置",
-            &format!("来源 {} 的 assh.yml{}", target, note),
+            &format!("来源 {} 的 assh.yml{}{}", target, note, secrets_note),
         );
-        Ok(format!("已从云端恢复 SSH 配置{}（{}）\n{}", note, target, msg))
+        Ok(format!(
+            "已从云端恢复 SSH 配置{}{}（{}）\n{}",
+            note, secrets_note, target, msg
+        ))
     })
     .await
     .map_err(|e| format!("任务失败: {}", e))?

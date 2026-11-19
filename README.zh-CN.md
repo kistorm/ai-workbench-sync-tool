@@ -183,7 +183,7 @@ pnpm tauri build        # 打包（.deb / AppImage / dmg / exe）
 - **测试**：`测试连通性`，常规主机直连 `user@host:port`（不依赖 assh 配置），密码用内置 PTY 自动输入，**无需 sshpass**
 - **macOS 无 assh 也可用**：未安装 assh 时自动使用内置基础生成器写 `~/.ssh/config`（支持主机/端口/用户/密钥/模板默认值）；跳板机（gateways）功能需安装 assh
 - **⇡ 推送到仓库**：只加密推送 `assh.yml` + 主机密码库（不动笔记/AI 数据）；自动合并远端（本地优先），推送失败自动重试 3 次
-- **⇣ 从云端恢复**：取回云端的 `encrypted/assh.yml.enc` 用主密码解密还原（兼容未加密旧仓库），随后重建 `~/.ssh/config`、主机列表立即刷新；不影响笔记/AI 数据
+- **⇣ 从云端恢复**：取回云端的 `encrypted/assh.yml.enc` **与 `encrypted/secrets.json.enc`（主机密码库）** 用主密码解密还原（兼容未加密旧仓库），随后重建 `~/.ssh/config`、主机列表立即刷新；不影响笔记/AI 数据
 - **重新生成 config**：从 `assh.yml` 生成标准 `~/.ssh/config`（增删改主机后也会自动执行）
 - **模板与通配**：直接编辑 `assh.yml` 使用 `inherit`、gateways、正则主机
 - **密码安全**：密码库 `secrets.json` 在本机权限 600；加密同步时以主密码整体加密为 `encrypted/secrets.json.enc`，明文绝不入库；SSH **私钥本体**永不参与同步

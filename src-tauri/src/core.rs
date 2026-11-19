@@ -441,40 +441,28 @@ fn load_secrets(state: &AppState) -> serde_json::Map<String, serde_json::Value> 
 /// 打开 SSH 页查看密码时按需自愈；已存在则不重复解密。
 pub fn ensure_secrets_restored(state: &AppState) {
     let path = secrets_path(state);
-    if path.exists() {
-        return;
-    }
-    let cfg = state.cfg();
-    if cfg.encrypt_password.is_empty() {
-        return;
-    }
-    let repo = crate::sync::config_repo_dir();
-    let enc = repo.join("encrypted").join("secrets.json.enc");
-    if !enc.is_file() {
-        return;
-    }
-    let Ok(salt) = fs::read(repo.join(".enc_salt")) else {
-        return;
+    let needs = if !path.exists() {
+        true
+    } else {
+        // 空文件（如旧版本恢复后留下的 {}）也视为缺失
+        fs::read_to_string(&path)
+            .map(|s| {
+                let t = s.trim();
+                t.is_empty() || t == "{}"
+            })
+            .unwrap_or(false)
     };
-    let Ok(blob) = fs::read(&enc) else {
+    if !needs {
         return;
-    };
-    let key = crate::crypto::derive_batch_key(&cfg.encrypt_password, &salt);
-    match crate::crypto::decrypt_with_key(&key, &blob) {
-        Ok(plain) => {
-            if let Some(parent) = path.parent() {
-                let _ = fs::create_dir_all(parent);
-            }
-            if fs::write(&path, &plain).is_ok() {
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
-                }
-                state.log("sync", "已恢复主机密码库", "来自 encrypted/secrets.json.enc");
-            }
+    }
+    if state.cfg().encrypt_password.is_empty() {
+        return;
+    }
+    if let Err(e) = crate::sync::restore_secrets_from_repo(state) {
+        // 云端本来就没有密码库属于正常情况，不打扰用户
+        if !e.contains("云端没有密码库") {
+            state.log("error", "密码库自动恢复失败", &e);
         }
-        Err(e) => state.log("error", "密码库自动解密失败", &e),
     }
 }
 

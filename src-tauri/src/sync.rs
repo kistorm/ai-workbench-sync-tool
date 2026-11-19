@@ -585,6 +585,50 @@ fn is_symlink(p: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// 从仓库的 encrypted/secrets.json.enc 解密密码库并写回 app 数据目录（权限 600）。
+/// 返回恢复的条目数。
+pub(crate) fn restore_secrets_from(
+    repo: &Path,
+    data_dir: &Path,
+    password: &str,
+) -> Result<usize, String> {
+    if password.is_empty() {
+        return Err("未设置主密码，无法解密密码库".into());
+    }
+    let enc = repo.join(ENC_DIR).join("secrets.json.enc");
+    if !enc.is_file() {
+        return Err("云端没有密码库（encrypted/secrets.json.enc）".into());
+    }
+    let salt = fs::read(repo.join(SALT_FILE))
+        .map_err(|_| "仓库缺少 .enc_salt（不是加密同步仓库）".to_string())?;
+    let key = crate::crypto::derive_batch_key(password, &salt);
+    let blob = fs::read(&enc).map_err(|e| format!("读取密码库密文失败: {}", e))?;
+    let plain = crate::crypto::decrypt_with_key(&key, &blob)
+        .map_err(|_| "密码库解密失败：主密码不正确".to_string())?;
+    let count = serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&plain)
+        .map(|m| m.len())
+        .unwrap_or(0);
+    let path = data_dir.join("secrets.json");
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    fs::write(&path, &plain).map_err(|e| format!("写入密码库失败: {}", e))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+    }
+    Ok(count)
+}
+
+/// 用当前配置从默认仓库恢复密码库
+pub(crate) fn restore_secrets_from_repo(st: &AppState) -> Result<usize, String> {
+    let cfg = st.cfg();
+    let n = restore_secrets_from(&config_repo_dir(), &st.data_dir, &cfg.encrypt_password)?;
+    st.log("sync", "已恢复主机密码库", &format!("{} 条", n));
+    Ok(n)
+}
+
 /// 拉取/恢复后：把仓库里的 assh.yml 同步到 ~/.ssh/assh.yml。
 /// macOS / Windows 上这两个文件是独立的（没有软链接），不同步会导致
 /// 恢复完成后 SSH 页读取 ~/.ssh/assh.yml 仍是空/引导配置，看不到云端主机。

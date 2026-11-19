@@ -764,3 +764,40 @@ fn it_basic_ssh_config_fallback() {
     assert!(!cfg.lines().any(|l| l.trim_start().starts_with("ProxyCommand")));
     let _ = fs::remove_dir_all(&base);
 }
+
+#[test]
+fn it_restore_secrets_from_repo() {
+    let base = std::env::temp_dir().join(format!("nexus-sec-restore-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    let repo = base.join("repo");
+    let data = base.join("data");
+    fs::create_dir_all(repo.join("encrypted")).unwrap();
+    fs::create_dir_all(&data).unwrap();
+
+    let pass = "sync-pass";
+    let salt = [3u8; 16];
+    fs::write(repo.join(".enc_salt"), salt).unwrap();
+    let key = crate::crypto::derive_batch_key(pass, &salt);
+    let plain = br#"{"host-a":"pw-a","host-b":"pw-b"}"#;
+    let blob = crate::crypto::encrypt_with_key(&key, plain).unwrap();
+    fs::write(repo.join("encrypted/secrets.json.enc"), blob).unwrap();
+
+    let n = crate::sync::restore_secrets_from(&repo, &data, pass).unwrap();
+    assert_eq!(n, 2, "应恢复 2 条密码");
+    let restored = fs::read_to_string(data.join("secrets.json")).unwrap();
+    assert!(restored.contains("host-a") && restored.contains("pw-a"));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = fs::metadata(data.join("secrets.json"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600, "恢复的密码库应保持 600 权限");
+    }
+    // 错误主密码必须失败，且不覆盖本地
+    assert!(crate::sync::restore_secrets_from(&repo, &data, "wrong-pass").is_err());
+
+    let _ = fs::remove_dir_all(&base);
+}

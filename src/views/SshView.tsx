@@ -401,8 +401,8 @@ export function SshView() {
         <div className="space-y-3">
           <div className="rounded-lg border border-[var(--color-status-warn)]/30 bg-[var(--color-status-warn)]/[0.06] p-3">
             <ul className="font-mono text-[10.5px] leading-relaxed text-[var(--color-nexus-text-dim)] space-y-1">
-              <li>· 从云端仓库取最新的 <span className="text-[var(--color-nexus-text)]">assh.yml</span>，覆盖本地</li>
-              <li>· <span className="text-[var(--color-status-warn)]">本地对 assh.yml 的未推送修改会丢失</span></li>
+              <li>· 从云端仓库取最新的 <span className="text-[var(--color-nexus-text)]">assh.yml</span> 与<span className="text-[var(--color-nexus-text)]">主机密码库</span>，覆盖本地</li>
+              <li>· <span className="text-[var(--color-status-warn)]">本地对 assh.yml 与密码库的未推送修改会丢失</span></li>
               <li>· <span className="text-[var(--color-nexus-text)]">不影响笔记、AI 会话等其他数据</span></li>
               <li>· 恢复后自动重建 ~/.ssh/config，主机列表立即刷新</li>
             </ul>
