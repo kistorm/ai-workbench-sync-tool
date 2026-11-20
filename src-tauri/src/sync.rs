@@ -269,6 +269,31 @@ pub(crate) fn current_branch(dir: &Path) -> String {
         .unwrap_or_else(|| "main".into())
 }
 
+/// 拉取合并：显式指定 origin 分支。
+/// 恢复模式 `reset --hard` 后本地分支可能没有 upstream 跟踪信息，
+/// 不带参数的 `git pull` 会报「当前分支没有跟踪信息」。
+pub(crate) fn git_pull_merge(
+    dir: &Path,
+    branch: &str,
+    envs: &[(&str, String)],
+) -> Result<crate::core::CmdResult, String> {
+    run_cmd_dir(
+        "git",
+        &[
+            "pull",
+            "-q",
+            "--rebase",
+            "--autostash",
+            "-X",
+            "ours",
+            "origin",
+            branch,
+        ],
+        dir,
+        envs,
+    )
+}
+
 /// 远端是否已有该分支（空仓库首次推送时没有）
 pub(crate) fn remote_has_branch(dir: &Path, branch: &str) -> bool {
     run_cmd_dir("git", &["ls-remote", "--heads", "origin", branch], dir, &[])
@@ -322,18 +347,13 @@ pub async fn git_sync(
                     &crate::core::git_identity_env(&target),
                 )?;
                 log_buf.push_str(&commit.combined());
-                let pull = run_cmd_dir(
-                    "git",
-                    &["pull", "-q", "--rebase", "--autostash", "-X", "ours"],
-                    &target,
-                    &[],
-                )?;
+                let branch = current_branch(&target);
+                let pull = git_pull_merge(&target, &branch, &[])?;
                 log_buf.push_str(&pull.combined());
                 if !pull.ok {
                     let _ = run_cmd_dir("git", &["rebase", "--abort"], &target, &[]);
                     return Err(format!("拉取合并冲突，已中止。\n{}", log_buf));
                 }
-                let branch = current_branch(&target);
                 let push = run_cmd_dir("git", &["push", "-q", "-u", "origin", &branch], &target, &[])?;
                 log_buf.push_str(&push.combined());
                 if !push.ok {
@@ -346,12 +366,7 @@ pub async fn git_sync(
                 if !remote_has_branch(&target, &branch) {
                     return Ok("远端为空，无需拉取".to_string());
                 }
-                let pull = run_cmd_dir(
-                    "git",
-                    &["pull", "-q", "--rebase", "--autostash", "-X", "ours"],
-                    &target,
-                    &[],
-                )?;
+                let pull = git_pull_merge(&target, &branch, &[])?;
                 log_buf.push_str(&pull.combined());
                 if !pull.ok {
                     let _ = run_cmd_dir("git", &["rebase", "--abort"], &target, &[]);
@@ -900,12 +915,7 @@ pub fn sync_data_repo(st: &AppState, action: &str) -> SyncItemResult {
 
     // 远端有分支才拉取（空仓库首次推送时跳过，否则会报 couldn't find remote ref）
     if remote_has_branch(&repo_dir, &branch) {
-        let pull = run_cmd_dir(
-            "git",
-            &["pull", "-q", "--rebase", "--autostash", "-X", "ours"],
-            &repo_dir,
-            &[],
-        );
+        let pull = git_pull_merge(&repo_dir, &branch, &[]);
         if !pull.as_ref().map(|p| p.ok).unwrap_or(false) {
             let _ = run_cmd_dir("git", &["rebase", "--abort"], &repo_dir, &[]);
             return SyncItemResult {

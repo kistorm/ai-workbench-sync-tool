@@ -45,7 +45,7 @@ if [ -d "{ssh_repo}/.git" ]; then
     git config user.email >/dev/null 2>&1 || {{ export GIT_AUTHOR_NAME="NEXUS Workbench" GIT_AUTHOR_EMAIL="nexus@localhost" GIT_COMMITTER_NAME="NEXUS Workbench" GIT_COMMITTER_EMAIL="nexus@localhost"; }}
     git add -A
     git commit -qm "auto: $(date +%F_%T)" 2>/dev/null || true
-    git pull -q --rebase --autostash -X ours 2>>"$LOG" || git rebase --abort 2>/dev/null || true
+    git pull -q --rebase --autostash -X ours origin "$(git rev-parse --abbrev-ref HEAD)" 2>>"$LOG" || git rebase --abort 2>/dev/null || true
     git push -q 2>>"$LOG"
   ) && echo "[$(date -Is)] ssh-config ok" >> "$LOG" || echo "[$(date -Is)] ssh-config failed" >> "$LOG"
 else
@@ -66,7 +66,7 @@ if [ -d "{notes_dir}/.git" ]; then
     git config user.email >/dev/null 2>&1 || {{ export GIT_AUTHOR_NAME="NEXUS Workbench" GIT_AUTHOR_EMAIL="nexus@localhost" GIT_COMMITTER_NAME="NEXUS Workbench" GIT_COMMITTER_EMAIL="nexus@localhost"; }}
     git add -A
     git commit -qm "auto notes: $(date +%F_%T)" 2>/dev/null || true
-    git pull -q --rebase --autostash 2>>"$LOG" || git rebase --abort 2>/dev/null || true
+    git pull -q --rebase --autostash origin "$(git rev-parse --abbrev-ref HEAD)" 2>>"$LOG" || git rebase --abort 2>/dev/null || true
     git push -q 2>>"$LOG"
   ) && echo "[$(date -Is)] notes ok" >> "$LOG" || echo "[$(date -Is)] notes failed" >> "$LOG"
 else

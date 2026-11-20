@@ -232,6 +232,13 @@ pub async fn onboard(
                 st.clear_running();
                 return Err(format!("重置工作区失败: {}", reset.combined()));
             }
+            // 补设 upstream：否则后续 `git pull`（笔记/AI/定时同步）会报「没有跟踪信息」
+            let _ = run_cmd_dir(
+                "git",
+                &["branch", "--set-upstream-to", &target, &branch],
+                &repo_dir,
+                &[],
+            );
 
             st.set_running(RunningAction {
                 title: "恢复模式".into(),

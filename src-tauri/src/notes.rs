@@ -283,12 +283,14 @@ pub async fn notes_git_sync(state: State<'_, AppState>, action: String) -> Resul
                     &git_root,
                     &crate::core::git_identity_env(&git_root),
                 );
-                let pull = run_cmd_dir("git", &["pull", "-q", "--rebase", "--autostash", "-X", "ours"], &git_root, &[])?;
+                let branch = crate::sync::current_branch(&git_root);
+                let pull = crate::sync::git_pull_merge(&git_root, &branch, &[])?;
                 let push = run_cmd_dir("git", &["push", "-q"], &git_root, &[])?;
                 format!("{}\n{}", pull.combined(), push.combined())
             }
             "pull" => {
-                let r = run_cmd_dir("git", &["pull", "-q", "--rebase", "--autostash", "-X", "ours"], &git_root, &[])?;
+                let branch = crate::sync::current_branch(&git_root);
+                let r = crate::sync::git_pull_merge(&git_root, &branch, &[])?;
                 if !r.ok {
                     return Err(r.combined());
                 }

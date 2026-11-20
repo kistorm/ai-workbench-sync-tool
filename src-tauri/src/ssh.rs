@@ -918,12 +918,7 @@ pub async fn push_ssh_config(state: State<'_, AppState>) -> Result<String, Strin
 
         // 远端有分支才拉取（首次推送跳过，否则报 couldn't find remote ref）
         if crate::sync::remote_has_branch(&repo, &branch) {
-            let pull = run_cmd_dir(
-                "git",
-                &["pull", "-q", "--rebase", "--autostash", "-X", "ours"],
-                &repo,
-                &ssh_env,
-            )?;
+            let pull = crate::sync::git_pull_merge(&repo, &branch, &ssh_env)?;
             if !pull.ok {
                 let _ = run_cmd_dir("git", &["rebase", "--abort"], &repo, &[]);
                 return Err(format!("拉取合并失败：{}", pull.combined()));
