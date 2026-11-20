@@ -168,7 +168,7 @@ Launching the app for the first time opens the onboarding screen:
 - **Strict Git URL validation**: only `git@host:owner/repo.git` is accepted — `https://`, `ssh://` and local paths are rejected in real time as you type (saving the config enforces the same rule)
 - **Mandatory connectivity check**: after entering the URL you must click “Check connectivity” (`git ls-remote`) before continuing; editing the URL clears the previous check result
 - **Live progress panel**: stage description + percentage + progress bar + elapsed time; git's object-transfer progress is parsed for push/pull
-- **Automatic network retries**: connectivity check, pull and push all retry 3 times (3 s apart); the progress panel shows “retry N”
+- **Automatic network retries**: connectivity check, pull and push retry **5 times** (3/5/8/10 s backoff); the progress panel shows “retry N / 5”. Failure messages suggest enabling a network accelerator
 - **5-second countdown** into the main UI on success (with a “Enter now” button)
 - **assh bootstrap config**: when `~/.ssh/assh.yml` is missing, a minimal transport-only config is generated automatically (just the git-sync channel, no user hosts) so the recovery flow itself can reach the network
 
@@ -187,7 +187,7 @@ Launching the app for the first time opens the onboarding screen:
 - **Password**: `View / change password`; when a master password is set the vault syncs (encrypted) and passwords are viewable after recovery
 - **Test**: `Test connectivity` — regular hosts are dialed directly (`user@host:port`, independent of the assh-generated config); passwords are typed via a built-in PTY, so **sshpass is not required**
 - **Works without assh on macOS**: if assh is missing, a built-in generator writes a standard `~/.ssh/config` (hosts/ports/users/keys/template defaults); jump-host (gateways) support still needs assh
-- **⇡ Push to repo**: encrypts & pushes only `assh.yml` + the password vault (notes/AI untouched); merges remote first (local-preferred) and retries 3 times on failure
+- **⇡ Push to repo**: encrypts & pushes only `assh.yml` + the password vault (notes/AI untouched); merges remote first (local-preferred) and retries 5 times on failure
 - **⇣ Restore from cloud**: fetches `encrypted/assh.yml.enc` **and `encrypted/secrets.json.enc` (host password vault)**, decrypts them with the master password (plain repos supported too), then rebuilds `~/.ssh/config` and refreshes the host list; notes/AI data untouched
 - **Regenerate config**: writes standard `~/.ssh/config` from `assh.yml` (also runs automatically after add/edit/delete)
 - **Templates & wildcards**: edit `assh.yml` directly for `inherit`, gateways, and regex hosts
