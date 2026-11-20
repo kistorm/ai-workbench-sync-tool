@@ -213,7 +213,8 @@ Launching the app for the first time opens the onboarding screen:
 - Create/edit/delete Markdown notes; **Markdown** and **rich-text** modes (auto-converted back to Markdown on save)
 - Delete triggers an automatic push so the deletion propagates to other machines
 - **Pull from Youdao Note**: paste browser cookies, pull-only; same-name notes are overwritten by newer cloud versions
-- **Clear all notes**: permanent local deletion (`.git` preserved)
+- **Clear all notes**: permanent local deletion (`.git` preserved); the encrypted cloud copy is untouched and can be restored with **Pull**
+- **Push/pull in encrypted mode**: Push re-encrypts plaintext notes before committing; Pull decrypts after merging back into `notes/` (no more stale ciphertext or an empty list after pulling)
 
 ### Sync & Scheduling
 
@@ -226,12 +227,12 @@ Launching the app for the first time opens the onboarding screen:
 ### System & Update (Settings page)
 
 - **System info**: the Settings page gains a "System & Update" block showing the OS type, OS version, current login account, and app version
-- **Check update**: click `Check update` to compare the version tags in the repo (e.g. `v0.2.0`) against the current version via `git ls-remote --tags`; when a newer version exists, a `⇣ Download vX` button appears and opens the GitHub Releases page to download the installer for your platform. No token required (private repos use the local SSH key)
+- **Check update**: compares the repo version tags via `git ls-remote --tags` with the current version and shows that release's changelog; no token required (private repos use the local SSH key). When an update exists, **`⇣ Upgrade now` downloads, installs and restarts automatically** (macOS replaces the app in /Applications, Windows runs a silent install, Linux swaps the AppImage); `Download` remains available for manual installation
 - **Network accelerator recommendation**: a new "Network accelerator" block recommends the xx-yun (xx-yun.com) proxy/acceleration service — click it to open the promo link; GitHub access is more stable from mainland-China networks
 
 ### Packages & Release
 
-- Pushing a `v*` tag (e.g. `v0.2.1`) makes GitHub Actions build and publish a Release on Windows / macOS (universal binary) / Ubuntu automatically
+- Pushing a `v*` tag (e.g. `v0.2.11`) makes GitHub Actions build and publish a Release on Windows / macOS (universal binary) / Ubuntu automatically
 - Artifacts: Windows `.msi` / `.exe`, macOS `.dmg`, Ubuntu `.deb` / `.AppImage`, plus Source code (zip / tar.gz) archives
 - Upgrade path: Settings → `Check update` → `⇣ Upgrade now` (automatic download, install and restart) or `Download` for a manual install
 
@@ -281,7 +282,7 @@ xattr -cr ~/Downloads/nexus-workbench_*_universal.dmg
 ## Development
 
 ```bash
-# Backend tests (42 tests: unit + integration)
+# Backend tests (49 tests: unit + integration)
 cd src-tauri && cargo test
 
 # Frontend type check / build
@@ -308,7 +309,7 @@ src-tauri/src/       Rust backend
   crypto.rs          AES-256-GCM encryption (100k-round SHA-256 KDF)
   cron.rs            Cron installer + auto-sync script
   youdao.rs          Youdao Note pull
-  tests.rs           42 unit/integration tests
+  tests.rs           49 unit/integration tests
 docs/images/         Screenshots
 ```
 

@@ -167,7 +167,7 @@ pnpm tauri build        # 打包（.deb / AppImage / dmg / exe）
 - **Git 地址严格格式校验**：仅接受 `git@host:用户名/仓库.git`；`https://`、`ssh://`、本地路径等会在输入时被实时拒绝（保存配置时同样校验）
 - **检测连通性前置**：填写地址后必须点「检测连通性」（`git ls-remote`），通过后才能继续；修改地址自动清除检测结果
 - **实时进度面板**：阶段说明 + 百分比 + 进度条 + 已用时间；推送/拉取解析 git 的对象传输进度
-- **网络自动重试**：连接验证、拉取、推送失败均自动重试 3 次（间隔 3 秒），进度条显示「第 N 次重试」
+- **网络自动重试**：连接验证、拉取、推送失败均自动重试 **5 次**（3/5/8/10 秒递增），进度条显示「第 N 次重试 / 共 5 次」；失败提示附带开启加速服务的建议
 - **成功 5 秒倒计时**进入主界面，也可点「立即进入」跳过
 - **assh 引导配置**：本机没有 `assh.yml` 时自动生成最小传输配置（仅含 git 同步通道，不含用户主机），避免恢复流程自身无法联网
 
@@ -184,7 +184,7 @@ pnpm tauri build        # 打包（.deb / AppImage / dmg / exe）
 - **密码**：`查看 / 修改密码`；设置了主密码时密码库随仓库加密同步，恢复后可直接查看
 - **测试**：`测试连通性`，常规主机直连 `user@host:port`（不依赖 assh 配置），密码用内置 PTY 自动输入，**无需 sshpass**
 - **macOS 无 assh 也可用**：未安装 assh 时自动使用内置基础生成器写 `~/.ssh/config`（支持主机/端口/用户/密钥/模板默认值）；跳板机（gateways）功能需安装 assh
-- **⇡ 推送到仓库**：只加密推送 `assh.yml` + 主机密码库（不动笔记/AI 数据）；自动合并远端（本地优先），推送失败自动重试 3 次
+- **⇡ 推送到仓库**：只加密推送 `assh.yml` + 主机密码库（不动笔记/AI 数据）；自动合并远端（本地优先），推送失败自动重试 5 次
 - **⇣ 从云端恢复**：取回云端的 `encrypted/assh.yml.enc` **与 `encrypted/secrets.json.enc`（主机密码库）** 用主密码解密还原（兼容未加密旧仓库），随后重建 `~/.ssh/config`、主机列表立即刷新；不影响笔记/AI 数据
 - **重新生成 config**：从 `assh.yml` 生成标准 `~/.ssh/config`（增删改主机后也会自动执行）
 - **模板与通配**：直接编辑 `assh.yml` 使用 `inherit`、gateways、正则主机
@@ -210,7 +210,8 @@ pnpm tauri build        # 打包（.deb / AppImage / dmg / exe）
 - 新建/编辑/删除 Markdown 笔记；支持 **Markdown** 与 **富文本** 两种模式（保存时自动转回 Markdown）
 - 删除后自动推送，让删除同步到其他机器
 - **从有道云拉取**：粘贴浏览器 Cookie，仅拉取；同名笔记由云端较新版本覆盖
-- **清空全部笔记**：本地永久删除（保留 `.git`）
+- **清空全部笔记**：本地永久删除（保留 `.git`）；云端密文不受影响，可用「拉取」恢复
+- **加密模式下的推送/拉取**：点「推送」会先把明文笔记重新加密再提交；点「拉取」会在合并后自动解密回 `notes/`（不会再出现密文过期或拉取后为空）
 
 ### 同步与定时任务
 
@@ -229,7 +230,7 @@ pnpm tauri build        # 打包（.deb / AppImage / dmg / exe）
 
 ### 安装包与 Release
 
-- 推送 `v*` tag（如 `v0.2.1`）后，GitHub Actions 自动在 Windows / macOS（通用二进制）/ Ubuntu 构建并发布 Release
+- 推送 `v*` tag（如 `v0.2.11`）后，GitHub Actions 自动在 Windows / macOS（通用二进制）/ Ubuntu 构建并发布 Release
 - 产物：Windows `.msi` / `.exe`、macOS `.dmg`、Ubuntu `.deb` / `.AppImage`，以及 Source code（zip / tar.gz）源码包
 - 升级路径：设置页「检查更新」→「⇣ 立即升级」（自动下载安装并重启），或「前往下载」手动安装
 
@@ -279,7 +280,7 @@ xattr -cr ~/Downloads/nexus-workbench_*_universal.dmg
 ## 开发
 
 ```bash
-# 后端测试（42 个：单元 + 集成）
+# 后端测试（49 个：单元 + 集成）
 cd src-tauri && cargo test
 
 # 前端类型检查 / 构建
@@ -306,7 +307,7 @@ src-tauri/src/       Rust 后端
   crypto.rs          AES-256-GCM 加解密（10 万轮 SHA-256 派生）
   cron.rs            crontab 安装器 + 自动同步脚本
   youdao.rs          有道云笔记拉取
-  tests.rs           42 个单元/集成测试
+  tests.rs           49 个单元/集成测试
 docs/images/         界面截图
 ```
 
@@ -335,6 +336,12 @@ Electerm 是单实例应用，应用会自动激活它的窗口（Linux 需要 `
 
 **Q：有道云笔记如何对接？**
 官方 OpenAPI 已停止新增申请。本项目采用 Cookie 方式拉取（仅拉取，不写回）。
+
+**Q：笔记拉取报「当前分支没有跟踪信息」？**
+v0.2.11 已修复：恢复模式完成后会自动补设 `origin/<分支>` upstream，且所有拉取改为显式 `git pull origin <分支>`。旧版本可手动执行一次：`cd ~/ssh-config-sync && git branch --set-upstream-to=origin/main main`。
+
+**Q：连接 GitHub 经常超时/不稳定？**
+应用自身的 git 网络操作使用**自包含 SSH 参数**（`-F /dev/null`，不读取本机 `~/.ssh/config`，不受 assh/ProxyCommand 状态影响，github 强制走 `ssh.github.com:443`），并对连接验证/拉取/推送自动重试 5 次。若线路持续不稳定，建议开启加速服务后重试。
 
 **Q：私有仓库下「检查更新」能工作吗？**
 能。检查走本机 SSH 密钥读取仓库 tag（`git ls-remote --tags`），不需要把仓库设为公开；下载安装包时浏览器已登录 GitHub 即可访问私有 Release。
