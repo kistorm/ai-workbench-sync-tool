@@ -24,12 +24,18 @@ jobs:
         include:
           - platform: ubuntu-22.04
             args: ""
+            target: ""
           - platform: windows-latest
             args: ""
-          # macOS 通用二进制：同时包含 Intel(x86_64) 与 Apple Silicon(aarch64)，
-          # 一个 DMG 通吃两种芯片（macos-14 镜像已下线，用 macos-latest）
+            target: ""
+          # macOS 拆成两个原生 job（Apple Silicon / Intel 各自本机编译），
+          # 避免 universal 交叉编译 C 依赖（rusqlite bundled）在 runner 上的兼容问题
           - platform: macos-latest
-            args: --target universal-apple-darwin
+            args: --target aarch64-apple-darwin
+            target: aarch64-apple-darwin
+          - platform: macos-13
+            args: --target x86_64-apple-darwin
+            target: x86_64-apple-darwin
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -85,7 +91,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "NEXUS Workbench ${{ github.ref_name }}"
-          releaseBody: "安装包：Windows（.msi/.exe）、macOS 通用包（universal.dmg 或 macos-universal.zip，含一键安装脚本）、Ubuntu（.deb/.AppImage）。源码包见下方 Source code。更新说明见 CHANGELOG.md。"
+          releaseBody: "安装包：Windows（.msi/.exe）、macOS（Intel：x64.dmg / Apple Silicon：aarch64.dmg）、Ubuntu（.deb/.AppImage）。源码包见下方 Source code。更新说明见 CHANGELOG.md。"
           releaseDraft: false
           prerelease: false
           projectPath: "."
@@ -108,7 +114,7 @@ jobs:
       - name: 打包 macOS .app.zip 与一键安装脚本
         if: startsWith(matrix.platform, 'macos')
         run: |
-          APP="src-tauri/target/universal-apple-darwin/release/bundle/macos/nexus-workbench.app"
+          APP="src-tauri/target/${{ matrix.target }}/release/bundle/macos/nexus-workbench.app"
           echo "== 校验签名 =="
           codesign --verify --deep --strict --verbose=2 "$APP"
           echo "== 校验架构 =="
@@ -133,7 +139,7 @@ jobs:
           echo "完成。"
           SH
           chmod +x "$STAGE/install-macos.command"
-          ditto -c -k --keepParent "$STAGE" "nexus-workbench_${VER}_macos-universal.zip"
+          ditto -c -k --keepParent "$STAGE" "nexus-workbench_${VER}_macos-${{ matrix.target }}.zip"
 
       - name: 上传 macOS zip 到 Release
         if: startsWith(matrix.platform, 'macos')
@@ -142,7 +148,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ github.ref_name }}
-          files: nexus-workbench_*_macos-universal.zip
+          files: nexus-workbench_*_macos-*.zip
 
       # tauri-action 已按 tag 创建 Release；softprops 检测到同名 Release 时
       # 追加 assets 并用 body_path 覆盖正文为完整更新日志

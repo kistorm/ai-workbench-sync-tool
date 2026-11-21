@@ -234,12 +234,12 @@ pnpm tauri build        # 打包（.deb / AppImage / dmg / exe）
 - 产物：Windows `.msi` / `.exe`、macOS `.dmg`、Ubuntu `.deb` / `.AppImage`，以及 Source code（zip / tar.gz）源码包
 - 升级路径：设置页「检查更新」→「⇣ 立即升级」（自动下载安装并重启），或「前往下载」手动安装
 
-**macOS 选包**：Release 提供两个 **通用包**（Intel 与 Apple Silicon 二合一，无需分辨芯片）：
+**macOS 选包**（按芯片二选一，均未做 Apple 公证）：
 
-| 文件 | 用法 |
+| 你的 Mac | 下载 |
 |---|---|
-| `nexus-workbench_x.y.z_macos-universal.zip` | **推荐**：解压后双击 `install-macos.command`，自动解除隔离、安装到 /Applications 并启动（若被拦截：右键 →「打开」） |
-| `nexus-workbench_x.y.z_universal.dmg` | 拖入「应用程序」后，执行下面任一命令 |
+| Intel 芯片（「关于本机」显示处理器为 Intel） | `nexus-workbench_x.y.z_x64.dmg`（或配套 `_macos-x86_64-apple-darwin.zip` 一键安装） |
+| Apple Silicon（M1/M2/M3/M4） | `nexus-workbench_x.y.z_aarch64.dmg`（或配套 `_macos-aarch64-apple-darwin.zip` 一键安装） |
 
 macOS 12 Monterey 及以上可用。**未做 Apple 公证，浏览器下载后首次运行会提示「文件已损坏」或「无法验证开发者」（并非真的损坏）**：
 

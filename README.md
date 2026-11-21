@@ -236,12 +236,12 @@ Launching the app for the first time opens the onboarding screen:
 - Artifacts: Windows `.msi` / `.exe`, macOS `.dmg`, Ubuntu `.deb` / `.AppImage`, plus Source code (zip / tar.gz) archives
 - Upgrade path: Settings → `Check update` → `⇣ Upgrade now` (automatic download, install and restart) or `Download` for a manual install
 
-**macOS package**: the Release provides two **universal builds** (one binary for Intel and Apple Silicon):
+**macOS packages** (pick by chip, neither is Apple-notarized):
 
-| File | How to use |
+| Your Mac | Download |
 |---|---|
-| `nexus-workbench_x.y.z_macos-universal.zip` | **Recommended**: unzip, double-click `install-macos.command` — it clears the quarantine flag, installs to /Applications and launches (if blocked: right-click → Open) |
-| `nexus-workbench_x.y.z_universal.dmg` | Drag to Applications, then run one of the commands below |
+| Intel ("About This Mac" shows an Intel processor) | `nexus-workbench_x.y.z_x64.dmg` (or the `_macos-x86_64-apple-darwin.zip` one-click installer) |
+| Apple Silicon (M1/M2/M3/M4) | `nexus-workbench_x.y.z_aarch64.dmg` (or the `_macos-aarch64-apple-darwin.zip` one-click installer) |
 
 Requires macOS 12 Monterey or later. **The app is not notarized, so the first launch after downloading will show “the app is damaged” or “cannot verify the developer” (it is not actually damaged)**:
 
