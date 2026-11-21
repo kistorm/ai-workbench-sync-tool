@@ -5,7 +5,7 @@ import { ErrorBox, Loading, useToast } from "../components/ui";
 
 export function AiView() {
   const { push } = useToast();
-  const status = useAsync(() => api.aiStatus(), [], { pollMs: 10000 });
+  const status = useAsync(() => api.aiStatus(), [], { pollMs: 30000 });
   const { busy, run } = useAction();
   const [output, setOutput] = useState<string>("");
   const [lastAction, setLastAction] = useState<string>("");

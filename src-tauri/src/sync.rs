@@ -14,94 +14,6 @@ pub struct Diagnosis {
     pub raw: String,
 }
 
-/// 构造 GIT_SSH_COMMAND
-/// - 指定了密钥：只用该密钥（IdentitiesOnly）
-/// - 未指定密钥：交给系统 SSH 配置 / ssh-agent（首次引导时还没有保存密钥）
-fn ssh_command(key: &str) -> String {
-    // -F /dev/null：不读用户 ~/.ssh/config。
-    // 用户的 config 可能带 assh ProxyCommand / 过期条目，会让应用的网络操作
-    // 超时或失败（例如清理过 assh.yml 后 ProxyCommand 悬空）。应用所需的
-    // 主机覆盖（HostName/Port）由 git_ssh_env 显式给出，完全自包含。
-    let common = "-F /dev/null -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new";
-    let key = key.trim();
-    if key.is_empty() {
-        format!("ssh {}", common)
-    } else {
-        // Git 在 Windows 上通过 sh 解析 GIT_SSH_COMMAND：反斜杠会被当转义符吃掉，
-        // 路径含空格也会被拆开。统一转正斜杠并加引号，macOS/Linux 加引号同样安全。
-        let p = expand_tilde(key).to_string_lossy().replace('\\', "/");
-        format!("ssh -F /dev/null -i \"{}\" -o IdentitiesOnly=yes {}", p, common)
-    }
-}
-
-/// 从 git@host:owner/repo.git 里提取主机名
-fn repo_host(url: &str) -> String {
-    url.split('@')
-        .nth(1)
-        .and_then(|s| s.split(':').next())
-        .unwrap_or("")
-        .to_string()
-}
-
-/// github.com 强制覆盖为 ssh.github.com:443 —— 不依赖 ~/.ssh/config 或 assh.yml
-/// 里的映射条目（用户删除 github.com 主机后同步通道依然可用）。
-fn apply_github_override(mut val: String, repo_host: &str) -> String {
-    if repo_host == "github.com" {
-        val.push_str(" -o HostName=ssh.github.com -o Port=443");
-    }
-    val
-}
-
-/// 供引导等网络 git 操作统一使用：按配置的密钥构造 GIT_SSH_COMMAND 环境变量。
-pub(crate) fn git_ssh_env(st: &AppState) -> Vec<(&'static str, String)> {
-    let cfg = st.cfg();
-    let val = apply_github_override(ssh_command(&cfg.ssh_key), &repo_host(&cfg.git_repo));
-    vec![("GIT_SSH_COMMAND", val)]
-}
-
-/// assh.yml 缺失时的最小引导配置：只包含 Git 同步所需的传输通道，不含用户主机数据。
-/// 场景：全新机器首次恢复，或本地 assh.yml 被清空——没有它，
-/// ~/.ssh/config（assh 生成）里的 ProxyCommand 会因 assh 读不到 yml 而失败，
-/// 恢复模式自身就无法联网拉取（鸡生蛋问题）。
-/// 恢复完成后，云端解密回来的完整 assh.yml 会覆盖这份引导文件。
-pub(crate) fn ensure_bootstrap_assh_yml(st: &AppState) -> Result<(), String> {
-    let dir = crate::ssh::ssh_dir_of(st);
-    let yml = dir.join("assh.yml");
-    if yml.exists() {
-        return Ok(());
-    }
-    let cfg = st.cfg();
-    // 从 git 仓库地址里取主机名（已通过 validate_git_repo_url 校验过格式）
-    let host = cfg
-        .git_repo
-        .split('@')
-        .nth(1)
-        .and_then(|s| s.split(':').next())
-        .unwrap_or("")
-        .to_string();
-    let content = if host == "github.com" {
-        // GitHub:SSH 走 ssh.github.com:443，规避 22 端口被干扰的网络环境
-        let idfile = cfg.ssh_key.trim();
-        let id = if idfile.is_empty() {
-            String::new()
-        } else {
-            format!(
-                "    identityfile: {}\n    identitiesonly: yes\n",
-                idfile
-            )
-        };
-        format!(
-            "# 由 NEXUS Workbench 引导生成：仅含 git 同步传输通道，不含用户主机。\nhosts:\n  github.com:\n    hostname: ssh.github.com\n    user: git\n    port: 443\n{}",
-            id
-        )
-    } else {
-        "# 由 NEXUS Workbench 引导生成：仅含 git 同步传输通道，不含用户主机。\nhosts: {}\n"
-            .to_string()
-    };
-    fs::create_dir_all(&dir).map_err(|e| format!("创建 SSH 目录失败: {}", e))?;
-    fs::write(&yml, content).map_err(|e| format!("写入引导 assh.yml 失败: {}", e))
-}
-
 /// 严格校验 Git 仓库地址：只接受 git@主机:用户/仓库.git 的 SSH（git）格式。
 /// 拒绝 https://、http://、ssh://、git://、file:// 以及本地路径等一切其他格式。
 pub fn validate_git_repo_url(repo: &str) -> Result<(), String> {
@@ -144,16 +56,13 @@ pub fn validate_git_repo_url(repo: &str) -> Result<(), String> {
 }
 
 /// 诊断 git 远程连通性（核心逻辑，可测试）
-pub fn diagnose_git_impl(repo: &str, key: &str) -> Result<Diagnosis, String> {
+pub fn diagnose_git_impl(repo: &str, _key: &str) -> Result<Diagnosis, String> {
     if repo.trim().is_empty() {
         return Err("未配置 Git 仓库地址".into());
     }
     validate_git_repo_url(repo)?;
     // 检测的仓库同样应用 github 443 覆盖（否则 -F /dev/null 后直连 22 端口被墙）
-    let env = [(
-        "GIT_SSH_COMMAND",
-        apply_github_override(ssh_command(key), &repo_host(repo)),
-    )];
+    let env: [(&str, String); 0] = [];
     let start = Instant::now();
     let res = run_cmd("git", &["ls-remote", repo], &env);
     let ms = start.elapsed().as_millis() as u64;
@@ -295,6 +204,49 @@ pub(crate) fn git_pull_merge(
 }
 
 /// 远端是否已有该分支（空仓库首次推送时没有）
+/// assh.yml 缺失时的最小引导配置：只包含 Git 同步所需的传输通道，不含用户主机数据。
+/// 场景：全新机器首次恢复，或本地 assh.yml 被清空——没有它，
+/// ~/.ssh/config（assh 生成）里的 ProxyCommand 会因 assh 读不到 yml 而失败，
+/// 恢复模式自身就无法联网拉取（鸡生蛋问题）。
+/// 恢复完成后，云端解密回来的完整 assh.yml 会覆盖这份引导文件。
+pub(crate) fn ensure_bootstrap_assh_yml(st: &AppState) -> Result<(), String> {
+    let dir = crate::ssh::ssh_dir_of(st);
+    let yml = dir.join("assh.yml");
+    if yml.exists() {
+        return Ok(());
+    }
+    let cfg = st.cfg();
+    // 从 git 仓库地址里取主机名（已通过 validate_git_repo_url 校验过格式）
+    let host = cfg
+        .git_repo
+        .split('@')
+        .nth(1)
+        .and_then(|s| s.split(':').next())
+        .unwrap_or("")
+        .to_string();
+    let content = if host == "github.com" {
+        // GitHub:SSH 走 ssh.github.com:443，规避 22 端口被干扰的网络环境
+        let idfile = cfg.ssh_key.trim();
+        let id = if idfile.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "    identityfile: {}\n    identitiesonly: yes\n",
+                idfile
+            )
+        };
+        format!(
+            "# 由 NEXUS Workbench 引导生成：仅含 git 同步传输通道，不含用户主机。\nhosts:\n  github.com:\n    hostname: ssh.github.com\n    user: git\n    port: 443\n{}",
+            id
+        )
+    } else {
+        "# 由 NEXUS Workbench 引导生成：仅含 git 同步传输通道，不含用户主机。\nhosts: {}\n"
+            .to_string()
+    };
+    fs::create_dir_all(&dir).map_err(|e| format!("创建 SSH 目录失败: {}", e))?;
+    fs::write(&yml, content).map_err(|e| format!("写入引导 assh.yml 失败: {}", e))
+}
+
 pub(crate) fn remote_has_branch(dir: &Path, branch: &str) -> bool {
     run_cmd_dir("git", &["ls-remote", "--heads", "origin", branch], dir, &[])
         .map(|r| r.ok && !r.stdout.trim().is_empty())
@@ -343,7 +295,6 @@ pub async fn git_sync(
     tauri::async_runtime::spawn_blocking(move || {
         // 让配置里的仓库地址生效
         apply_remote(&target, &repo)?;
-        let ssh_env = git_ssh_env(&st);
         let action = action.to_lowercase();
         let mut log_buf = String::new();
         match action.as_str() {
@@ -362,13 +313,13 @@ pub async fn git_sync(
                 )?;
                 log_buf.push_str(&commit.combined());
                 let branch = current_branch(&target);
-                let pull = git_pull_merge(&target, &branch, &ssh_env)?;
+                let pull = git_pull_merge(&target, &branch, &[])?;
                 log_buf.push_str(&pull.combined());
                 if !pull.ok {
                     let _ = run_cmd_dir("git", &["rebase", "--abort"], &target, &[]);
                     return Err(format!("拉取合并冲突，已中止。\n{}", log_buf));
                 }
-                let push = run_cmd_dir("git", &["push", "-q", "-u", "origin", &branch], &target, &ssh_env)?;
+                let push = run_cmd_dir("git", &["push", "-q", "-u", "origin", &branch], &target, &[])?;
                 log_buf.push_str(&push.combined());
                 if !push.ok {
                     return Err(log_buf);
@@ -380,7 +331,7 @@ pub async fn git_sync(
                 if !remote_has_branch(&target, &branch) {
                     return Ok("远端为空，无需拉取".to_string());
                 }
-                let pull = git_pull_merge(&target, &branch, &ssh_env)?;
+                let pull = git_pull_merge(&target, &branch, &[])?;
                 log_buf.push_str(&pull.combined());
                 if !pull.ok {
                     let _ = run_cmd_dir("git", &["rebase", "--abort"], &target, &[]);
@@ -926,11 +877,10 @@ pub fn sync_data_repo(st: &AppState, action: &str) -> SyncItemResult {
     }
 
     let branch = current_branch(&repo_dir);
-    let ssh_env = git_ssh_env(st);
 
     // 远端有分支才拉取（空仓库首次推送时跳过，否则会报 couldn't find remote ref）
     if remote_has_branch(&repo_dir, &branch) {
-        let pull = git_pull_merge(&repo_dir, &branch, &ssh_env);
+        let pull = git_pull_merge(&repo_dir, &branch, &[]);
         if !pull.as_ref().map(|p| p.ok).unwrap_or(false) {
             let _ = run_cmd_dir("git", &["rebase", "--abort"], &repo_dir, &[]);
             return SyncItemResult {
@@ -965,7 +915,7 @@ pub fn sync_data_repo(st: &AppState, action: &str) -> SyncItemResult {
         };
     }
 
-    match push_branch(&repo_dir, &branch, &ssh_env) {
+    match push_branch(&repo_dir, &branch, &[]) {
         Ok(p) if p.ok => SyncItemResult {
             name,
             ok: true,
@@ -1011,12 +961,24 @@ fn sync_ai_repo(st: &AppState, action: &str) -> SyncItemResult {
     };
     let act = if action == "pull" { "pull" } else { "push" };
     // AI_SYNC_REPO 让脚本收集到统一仓库的 ai-sessions/，
-    // 其内部 git 操作会自动落到上级数据仓库（不需要独立 remote）
+    // 其内部 git 操作会自动落到上级数据仓库（不需要独立 remote）。
+    // 路径覆盖：设置里自定义了 AI 工具目录时，通过环境变量传给脚本
+    let ap = &cfg.ai_paths;
+    let mut envs: Vec<(&str, String)> = vec![("AI_SYNC_REPO", data_dir.to_string_lossy().to_string())];
+    for (key, val) in [
+        ("ZCODE_HOME", &ap.zcode),
+        ("CLAUDE_HOME", &ap.claude),
+        ("DSH_HOME", &ap.dsh),
+    ] {
+        if !val.trim().is_empty() {
+            envs.push((key, crate::core::expand_tilde(val).to_string_lossy().to_string()));
+        }
+    }
     match run_cmd_dir(
         "bash",
         &["sync.sh", act],
         &script_dir,
-        &[("AI_SYNC_REPO", data_dir.to_string_lossy().to_string())],
+        &envs,
     ) {
         Ok(r) if r.ok => SyncItemResult {
             name,
@@ -1161,15 +1123,4 @@ pub fn init_data_repo(state: State<AppState>) -> Result<String, String> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn ssh_command_quotes_and_normalizes_key_path() {
-        let s = ssh_command("~/.ssh/id_ed25519_github");
-        assert!(s.contains("-F /dev/null"), "应绕过用户 ssh 配置: {}", s);
-        assert!(s.contains("-i \""), "密钥路径应加引号: {}", s);
-        assert!(s.contains("IdentitiesOnly=yes"));
-        assert!(s.contains("ConnectTimeout=15"));
-        assert!(!s.contains('\\'), "不应包含反斜杠（Windows 会被 sh 吃掉）: {}", s);
-        let empty = ssh_command("");
-        assert!(empty.starts_with("ssh -F /dev/null"));
-    }
 }

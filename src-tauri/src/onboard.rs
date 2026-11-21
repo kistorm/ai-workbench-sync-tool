@@ -82,8 +82,6 @@ pub async fn onboard(
         // 并保证 github.com → ssh.github.com:443 等映射是最新的）
         let _ = crate::ssh::build_ssh_config_impl(&st);
 
-        // 网络 git 操作统一走同一 GIT_SSH_COMMAND（有密钥用密钥，没有走 agent/系统配置）
-        let ssh_env = crate::sync::git_ssh_env(&st);
 
         // 本地仓库初始化
         if !repo_dir.join(".git").exists() {
@@ -108,7 +106,7 @@ pub async fn onboard(
             let mut last = None;
             let waits = [2u64, 4, 6, 8];
             for attempt in 1..=5usize {
-                let r = run_cmd_dir("git", &["ls-remote", "origin"], &repo_dir, &ssh_env);
+                let r = run_cmd_dir("git", &["ls-remote", "origin"], &repo_dir, &[]);
                 match &r {
                     Ok(res) if res.ok => {
                         last = Some(r);
@@ -139,7 +137,7 @@ pub async fn onboard(
             }
             None => unreachable!(),
         }
-        let remote_empty = run_cmd_dir("git", &["ls-remote", "origin"], &repo_dir, &ssh_env)
+        let remote_empty = run_cmd_dir("git", &["ls-remote", "origin"], &repo_dir, &[])
             .map(|r| r.stdout.trim().is_empty())
             .unwrap_or(true);
 
@@ -176,7 +174,7 @@ pub async fn onboard(
                     "git",
                     &["fetch", "--progress", "origin"],
                     &repo_dir,
-                    &ssh_env,
+                    &[],
                     |line| {
                         if let Some(p) = git_pct(line, "Receiving objects:") {
                             let mapped = 15 + p * 40 / 100;
@@ -328,7 +326,7 @@ pub async fn onboard(
             // ---------- 全新模式 ----------
             // 注意：GitHub 仓库无法真正做到"无分支"，因此判断标准是远程树里是否有文件
             if !remote_empty {
-                let fetch = run_cmd_dir("git", &["fetch", "-q", "origin"], &repo_dir, &ssh_env);
+                let fetch = run_cmd_dir("git", &["fetch", "-q", "origin"], &repo_dir, &[]);
                 let fetch_ok = fetch.as_ref().map(|r| r.ok).unwrap_or(false);
                 if !fetch_ok {
                     st.clear_running();
@@ -460,7 +458,7 @@ pub async fn onboard(
                     "git",
                     &["push", "--progress", "--force", "-u", "origin", "main"],
                     &repo_dir,
-                    &ssh_env,
+                    &[],
                     |line| {
                         if let Some(p) = git_pct(line, "Writing objects:") {
                             let mapped = 72 + p * 26 / 100;

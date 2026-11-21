@@ -32,6 +32,12 @@ pub fn run() {
             if repo_dir.join(".git").exists() && !cfg_start.git_repo.trim().is_empty() {
                 let _ = sync::apply_remote(&repo_dir, &cfg_start.git_repo);
             }
+            // 定时同步默认关闭，需在设置里手动开启（Windows 上强制关闭）
+            let mut cfg_start = state.cfg();
+            if cfg_start.auto_sync_enabled {
+                cfg_start.auto_sync_enabled = false;
+                let _ = state.save_config(&cfg_start);
+            }
             state.log("info", "NEXUS Workbench 已启动", "工作台就绪");
             app.manage(state);
             app.manage(terminal::TerminalManager::default());
@@ -80,6 +86,7 @@ pub fn run() {
             core::get_running_action,
             core::app_info,
             core::system_info,
+            core::ai_default_paths,
             update::download_update,
             update::install_update,
             update::update_progress,

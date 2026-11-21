@@ -12,11 +12,11 @@ const kindIcon: Record<string, { icon: string; color: string }> = {
 };
 
 export function Dashboard({ onGoto }: { onGoto: (tab: "ssh" | "ai" | "notes" | "sync") => void }) {
-  const running = useAsync(() => api.getRunningAction(), [], { pollMs: 3000 });
-  const activities = useAsync(() => api.listActivities(30), [], { pollMs: 5000 });
-  const hosts = useAsync(() => api.listHosts(), [], { pollMs: 15000 });
-  const ai = useAsync(() => api.aiStatus(), [], { pollMs: 15000 });
-  const notes = useAsync(() => api.listNotes(), [], { pollMs: 20000 });
+  const running = useAsync(() => api.getRunningAction(), [], { pollMs: 5000 });
+  const activities = useAsync(() => api.listActivities(30), [], { pollMs: 10000 });
+  const hosts = useAsync(() => api.listHosts(), [], { pollMs: 30000 });
+  const ai = useAsync(() => api.aiStatus(), [], { pollMs: 30000 });
+  const notes = useAsync(() => api.listNotes(), [], { pollMs: 30000 });
 
   const upHosts = (hosts.data ?? []).filter((h) => h.alias && h.hostname).length;
   const detectedTools = (ai.data?.tools ?? []).filter((t) => t.detected).length;

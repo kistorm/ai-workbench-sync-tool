@@ -61,20 +61,39 @@ pub struct AppConfig {
     pub encrypt_password: String,
     /// 是否已完成首次引导
     pub onboarded: bool,
+    /// AI 工具数据目录覆盖（空 = 使用当前平台默认路径）
+    #[serde(default, alias = "AiPaths")]
+    pub ai_paths: AiPaths,
+}
+
+/// 各 AI 工具数据目录的覆盖配置
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AiPaths {
+    #[serde(default)]
+    pub zcode: String,
+    #[serde(default)]
+    pub claude: String,
+    #[serde(default)]
+    pub dsh: String,
+    #[serde(default)]
+    pub cursor: String,
+    #[serde(default)]
+    pub trae: String,
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
             git_repo: String::new(),
-            ssh_key: "~/.ssh/id_ed25519_github".into(),
+            ssh_key: String::new(),
             sync_interval_min: 60,
             conflict_strategy: "newest_wins".into(),
             notes_dir: "~/ssh-config-sync/notes".into(),
             ai_sync_dir: "~/ai-session-sync".into(),
             ssh_dir: "~/.ssh".into(),
             electerm_cmd: "electerm".into(),
-            auto_sync_enabled: true,
+            auto_sync_enabled: false,
+            ai_paths: Default::default(),
             encrypt_password: String::new(),
             onboarded: false,
         }
@@ -724,7 +743,7 @@ pub(crate) fn extract_changelog_section(text: &str, version: &str) -> Option<Str
 }
 
 /// 浅克隆应用仓库到本地缓存，读取 CHANGELOG.md 中指定版本的更新日志
-fn fetch_changelog(st: &AppState, version: &str, ssh_env: &[(&str, String)]) -> Option<String> {
+fn fetch_changelog(st: &AppState, version: &str) -> Option<String> {
     let cache = st.data_dir.join("update-cache").join("app-repo");
     let ok = if cache.join(".git").exists() {
         // 已缓存：fetch 最新 main 并复位
@@ -732,7 +751,7 @@ fn fetch_changelog(st: &AppState, version: &str, ssh_env: &[(&str, String)]) -> 
             "git",
             &["fetch", "--depth", "1", "-q", "origin", "main"],
             &cache,
-            ssh_env,
+            &[],
         )
         .map(|r| r.ok)
         .unwrap_or(false);
@@ -753,7 +772,7 @@ fn fetch_changelog(st: &AppState, version: &str, ssh_env: &[(&str, String)]) -> 
                 APP_REPO_URL,
                 cache.to_str().unwrap_or(""),
             ],
-            ssh_env,
+            &[],
         )
         .map(|r| r.ok)
         .unwrap_or(false)
@@ -769,10 +788,8 @@ fn check_update_impl(st: &AppState) -> UpdateInfo {
     let current = env!("CARGO_PKG_VERSION").to_string();
     // 升级检查固定查应用代码仓库（不随用户的数据仓库变化）
     let release_url = format!("https://github.com/{}/releases/latest", APP_REPO_SLUG);
-    let ssh_env = crate::sync::git_ssh_env(st);
-
-    // 直接对应用代码仓库执行 ls-remote
-    let result = run_cmd("git", &["ls-remote", "--tags", APP_REPO_URL], &ssh_env);
+    // 直接对应用代码仓库执行 ls-remote（系统 ssh，用户自行配置密钥）
+    let result = run_cmd("git", &["ls-remote", "--tags", APP_REPO_URL], &[]);
 
     let output = match result {
         Ok(r) if r.ok => r.stdout,
@@ -809,7 +826,7 @@ fn check_update_impl(st: &AppState) -> UpdateInfo {
         "当前已是最新版本".into()
     };
     // 拉取该版本的更新日志（失败不影响检查结果）
-    let changelog = fetch_changelog(st, &latest, &ssh_env);
+    let changelog = fetch_changelog(st, &latest);
     UpdateInfo {
         current,
         latest: Some(latest),
@@ -817,6 +834,53 @@ fn check_update_impl(st: &AppState) -> UpdateInfo {
         release_url,
         changelog,
         message,
+    }
+}
+
+/// 各 AI 工具数据目录的当前平台默认路径（恢复/收集时未自定义则使用）
+#[tauri::command]
+pub fn ai_default_paths() -> AiPaths {
+    let home = home();
+    #[cfg(target_os = "macos")]
+    {
+        AiPaths {
+            zcode: home.join(".zcode").to_string_lossy().to_string(),
+            claude: home.join(".claude").to_string_lossy().to_string(),
+            dsh: home.join(".dsh").to_string_lossy().to_string(),
+            cursor: home
+                .join("Library/Application Support/Cursor")
+                .to_string_lossy()
+                .to_string(),
+            trae: home
+                .join("Library/Application Support/Trae")
+                .to_string_lossy()
+                .to_string(),
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let app_data = std::env::var("APPDATA").unwrap_or_else(|_| {
+            home.join("AppData/Roaming").to_string_lossy().to_string()
+        });
+        AiPaths {
+            zcode: home.join(".zcode").to_string_lossy().to_string(),
+            claude: home.join(".claude").to_string_lossy().to_string(),
+            dsh: home.join(".dsh").to_string_lossy().to_string(),
+            cursor: format!("{}\\Cursor", app_data),
+            trae: format!("{}\\Trae", app_data),
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let xdg = std::env::var("XDG_CONFIG_HOME")
+            .unwrap_or_else(|_| home.join(".config").to_string_lossy().to_string());
+        AiPaths {
+            zcode: home.join(".zcode").to_string_lossy().to_string(),
+            claude: home.join(".claude").to_string_lossy().to_string(),
+            dsh: home.join(".dsh").to_string_lossy().to_string(),
+            cursor: format!("{}/Cursor", xdg),
+            trae: format!("{}/Trae", xdg),
+        }
     }
 }
 

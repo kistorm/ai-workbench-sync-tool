@@ -135,6 +135,7 @@ export interface AppConfig {
   electerm_cmd: string;
   auto_sync_enabled: boolean;
   encrypt_password: string;
+  ai_paths: Partial<AiPaths>;
 }
 
 export interface SshKeyInfo {
@@ -156,6 +157,14 @@ export interface AppInfo {
   data_dir: string;
   os: string;
   arch: string;
+}
+
+export interface AiPaths {
+  zcode: string;
+  claude: string;
+  dsh: string;
+  cursor: string;
+  trae: string;
 }
 
 export interface SystemInfo {
@@ -204,6 +213,7 @@ export const api = {
   getRunningAction: () => invoke<RunningAction>("get_running_action"),
   appInfo: () => invoke<AppInfo>("app_info"),
   getSystemInfo: () => invoke<SystemInfo>("system_info"),
+  aiDefaultPaths: () => invoke<AiPaths>("ai_default_paths"),
   checkUpdate: () => invoke<UpdateInfo>("check_update"),
   downloadUpdate: () => invoke<DownloadedUpdate>("download_update"),
   installUpdate: (path: string, version: string) =>

@@ -77,9 +77,8 @@ fn parse_version_triple(s: &str) -> Option<(u64, u64, u64)> {
     Some((n[0], n[1], n[2]))
 }
 
-fn latest_remote_version(st: &AppState) -> Result<String, String> {
-    let ssh_env = crate::sync::git_ssh_env(st);
-    let out = run_cmd("git", &["ls-remote", "--tags", APP_REPO_URL], &ssh_env)?;
+fn latest_remote_version() -> Result<String, String> {
+    let out = run_cmd("git", &["ls-remote", "--tags", APP_REPO_URL], &[])?;
     if !out.ok {
         return Err("无法获取远端版本（请检查网络）".into());
     }
@@ -149,10 +148,9 @@ fn content_length(url: &str) -> u64 {
 
 /// 下载最新版本安装包到临时目录
 #[tauri::command]
-pub async fn download_update(state: State<'_, AppState>) -> Result<DownloadedUpdate, String> {
-    let st = state.inner().clone();
+pub async fn download_update(_state: State<'_, AppState>) -> Result<DownloadedUpdate, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let version = latest_remote_version(&st)?;
+        let version = latest_remote_version()?;
         let asset = asset_name(&version)
             .ok_or_else(|| "当前平台不支持自动更新，请前往 Releases 手动下载".to_string())?;
         let url = download_url(&version, &asset);

@@ -261,7 +261,6 @@ pub async fn notes_git_sync(state: State<'_, AppState>, action: String) -> Resul
     let st = state.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let action = action.to_lowercase();
-        let ssh_env = crate::sync::git_ssh_env(&st);
         let res = match action.as_str() {
             "push" => {
                 // 加密模式：先把明文笔记重新加密，再提交 encrypted/ 下的变更
@@ -285,13 +284,13 @@ pub async fn notes_git_sync(state: State<'_, AppState>, action: String) -> Resul
                     &crate::core::git_identity_env(&git_root),
                 );
                 let branch = crate::sync::current_branch(&git_root);
-                let pull = crate::sync::git_pull_merge(&git_root, &branch, &ssh_env)?;
-                let push = run_cmd_dir("git", &["push", "-q"], &git_root, &ssh_env)?;
+                let pull = crate::sync::git_pull_merge(&git_root, &branch, &[])?;
+                let push = run_cmd_dir("git", &["push", "-q"], &git_root, &[])?;
                 format!("{}\n{}", pull.combined(), push.combined())
             }
             "pull" => {
                 let branch = crate::sync::current_branch(&git_root);
-                let r = crate::sync::git_pull_merge(&git_root, &branch, &ssh_env)?;
+                let r = crate::sync::git_pull_merge(&git_root, &branch, &[])?;
                 if !r.ok {
                     return Err(r.combined());
                 }

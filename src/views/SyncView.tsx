@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import type { AppConfig, CronStatus, Diagnosis, ElectermInfo, RepoInfo, SshKeyInfo, SyncItemResult, SystemInfo, UpdateInfo } from "../api";
+import type { AiPaths, AppConfig, CronStatus, Diagnosis, ElectermInfo, RepoInfo, SyncItemResult, SystemInfo, UpdateInfo } from "../api";
 import { useAction, useAsync } from "../hooks";
 import { ErrorBox, Loading, Modal, useToast } from "../components/ui";
 import { THEMES, DEFAULT_APP_NAME } from "../theme";
@@ -16,7 +16,7 @@ interface SyncViewProps {
 export function SyncView({ theme, onThemeChange, appName, onAppNameChange }: SyncViewProps) {
   const { push } = useToast();
   const cfgQ = useAsync(() => api.getSyncConfig(), []);
-  const repo = useAsync(() => api.repoInfo(), [], { pollMs: 15000 });
+  const repo = useAsync(() => api.repoInfo(), [], { pollMs: 30000 });
   const cronQ = useAsync(() => api.cronStatus(), []);
   const { busy, run } = useAction();
 
@@ -26,14 +26,13 @@ export function SyncView({ theme, onThemeChange, appName, onAppNameChange }: Syn
   const [confirmRemoveCron, setConfirmRemoveCron] = useState(false);
   const [showLog, setShowLog] = useState(false);
   const [logLines, setLogLines] = useState<string[]>([]);
-  const [keysOpen, setKeysOpen] = useState(false);
-  const [keys, setKeys] = useState<SshKeyInfo[]>([]);
   const [lastSync, setLastSync] = useState<SyncItemResult[] | null>(null);
   const [electermInfo, setElectermInfo] = useState<ElectermInfo | null>(null);
   const [restoreOpen, setRestoreOpen] = useState(false);
   const [restoreConfirm, setRestoreConfirm] = useState(false);
   const [syncKeyVisible, setSyncKeyVisible] = useState(false);
   const [sysInfo, setSysInfo] = useState<SystemInfo | null>(null);
+  const [aiDefaults, setAiDefaults] = useState<AiPaths | null>(null);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [checking, setChecking] = useState(false);
   const [updating, setUpdating] = useState(false);
@@ -46,6 +45,11 @@ export function SyncView({ theme, onThemeChange, appName, onAppNameChange }: Syn
       setInterval(cfgQ.data.sync_interval_min || 60);
     }
   }, [cfgQ.data]);
+
+  // 加载当前平台默认 AI 路径（作为输入框 placeholder）
+  useEffect(() => {
+    api.aiDefaultPaths().then(setAiDefaults).catch(() => {});
+  }, []);
 
   // 打开设置页时自动探测一次 Electerm
   useEffect(() => {
@@ -125,19 +129,6 @@ export function SyncView({ theme, onThemeChange, appName, onAppNameChange }: Syn
       }
     } catch (e) {
       push("err", "检测失败", String(e));
-    }
-  }
-
-  async function openKeyPicker() {
-    try {
-      const list = await api.listSshKeys();
-      setKeys(list);
-      setKeysOpen(true);
-      if (list.length === 0) {
-        push("info", "未找到密钥", "~/.ssh 下没有检测到私钥文件");
-      }
-    } catch (e) {
-      push("err", "读取密钥失败", String(e));
     }
   }
 
@@ -401,6 +392,41 @@ export function SyncView({ theme, onThemeChange, appName, onAppNameChange }: Syn
               )}
             </section>
 
+            {/* AI 会话路径 */}
+            <section className="surface p-5">
+              <h3 className="font-mono text-[10px] tracking-[0.14em] text-[var(--color-nexus-text-faint)] uppercase mb-3">
+                AI 会话数据路径
+              </h3>
+              <p className="font-mono text-[10px] text-[var(--color-nexus-text-faint)] mb-3">
+                留空 = 使用当前系统默认路径（按平台自动适配）；修改后点「保存配置」生效，恢复时会写入对应目录
+              </p>
+              <div className="space-y-3">
+                {([
+                  ["zcode", "ZCode", aiDefaults?.zcode],
+                  ["claude", "Claude Code", aiDefaults?.claude],
+                  ["dsh", "DeepSeek Harness (DSH)", aiDefaults?.dsh],
+                  ["cursor", "Cursor", aiDefaults?.cursor],
+                  ["trae", "Trae", aiDefaults?.trae],
+                ] as const).map(([key, label, def]) => (
+                  <div key={key} className="flex items-center gap-3">
+                    <span className="font-mono text-[11px] text-[var(--color-nexus-text-dim)] w-44 shrink-0">{label}</span>
+                    <input
+                      value={(cfg.ai_paths as Record<string, string> | undefined)?.[key] ?? ""}
+                      onChange={(e) =>
+                        update("ai_paths", {
+                          ...(cfg.ai_paths as Record<string, string>),
+                          [key]: e.target.value,
+                        })
+                      }
+                      placeholder={def ?? "系统默认"}
+                      className={`${inputCls} flex-1 font-mono text-[11px]`}
+                      spellCheck={false}
+                    />
+                  </div>
+                ))}
+              </div>
+            </section>
+
             {/* 网络加速推荐 */}
             <section className="surface px-4 py-3 flex items-center justify-between gap-3">
               <div className="min-w-0">
@@ -441,21 +467,6 @@ export function SyncView({ theme, onThemeChange, appName, onAppNameChange }: Syn
                   <p className="font-mono text-[10px] text-[var(--color-nexus-text-faint)] mt-1">
                     仅支持 SSH 格式：git@host:用户名/仓库.git
                   </p>
-                </div>
-                <div>
-                  <label className="block font-mono text-[11px] text-[var(--color-nexus-text-dim)] mb-1.5">
-                    SSH 密钥
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      value={cfg.ssh_key}
-                      onChange={(e) => update("ssh_key", e.target.value)}
-                      className={`${inputCls} flex-1`}
-                    />
-                    <button className="btn shrink-0" onClick={openKeyPicker}>
-                      读取系统
-                    </button>
-                  </div>
                 </div>
                 <div>
                   <label className="block font-mono text-[11px] text-[var(--color-nexus-text-dim)] mb-1.5">
@@ -736,48 +747,6 @@ export function SyncView({ theme, onThemeChange, appName, onAppNameChange }: Syn
           </>
         )}
       </div>
-
-      <Modal
-        open={keysOpen}
-        title="选择 SSH 密钥"
-        onClose={() => setKeysOpen(false)}
-        footer={
-          <button className="btn" onClick={() => setKeysOpen(false)}>
-            关闭
-          </button>
-        }
-      >
-        <div className="space-y-2">
-          <p className="font-mono text-[10.5px] text-[var(--color-nexus-text-faint)] mb-3">
-            从 {cfg?.ssh_dir ?? "~/.ssh"} 中检测到的私钥：
-          </p>
-          {keys.length === 0 && (
-            <p className="font-mono text-[11px] text-[var(--color-nexus-text-dim)]">未找到私钥文件</p>
-          )}
-          {keys.map((k) => (
-            <button
-              key={k.path}
-              onClick={() => {
-                update("ssh_key", k.path);
-                setKeysOpen(false);
-                push("ok", "已选择密钥", k.name);
-              }}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-left transition-colors ${
-                cfg?.ssh_key === k.path ? "bg-white/[0.06]" : "hover:bg-white/[0.03]"
-              }`}
-            >
-              <div className="min-w-0">
-                <div className="font-mono text-[12.5px] text-[var(--color-nexus-text)] truncate">{k.name}</div>
-                <div className="font-mono text-[10px] text-[var(--color-nexus-text-faint)] truncate">{k.path}</div>
-              </div>
-              <div className="flex items-center gap-2 shrink-0 ml-3">
-                <span className="font-mono text-[10px] text-[var(--color-neon-cyan)]">{k.kind}</span>
-                {k.has_pub && <span className="font-mono text-[10px] text-[var(--color-status-on)]">.pub</span>}
-              </div>
-            </button>
-          ))}
-        </div>
-      </Modal>
 
       <Modal
         open={confirmRemoveCron}

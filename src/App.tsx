@@ -57,7 +57,7 @@ function Shell() {
   useEffect(() => {
     saveAppName(appName);
   }, [appName]);
-  const hosts = useAsync(() => api.listHosts(), [], { pollMs: 20000 });
+  const hosts = useAsync(() => api.listHosts(), [], { pollMs: 30000 });
   const {
     terminals,
     activeTerm,
@@ -68,8 +68,8 @@ function Shell() {
     setActiveTerm,
     setTerminalsVisible,
   } = useAppTasks();
-  const running = useAsync(() => api.getRunningAction(), [], { pollMs: 3000 });
-  const cron = useAsync(() => api.cronStatus(), [], { pollMs: 30000 });
+  const running = useAsync(() => api.getRunningAction(), [], { pollMs: 5000 });
+  const cron = useAsync(() => api.cronStatus(), [], { pollMs: 60000 });
 
   // 键盘快捷键：Ctrl+Tab 切换页面（保留 Tab 原生焦点导航）
   useEffect(() => {

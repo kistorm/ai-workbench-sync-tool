@@ -125,12 +125,15 @@ pub(crate) fn zcode_session_count(zcode_dir: &std::path::Path) -> u64 {
     count_files(&zcode_dir.join("cli").join("rollout"), ".jsonl")
 }
 
-fn detect_tools() -> Vec<AiTool> {
+fn detect_tools(overrides: &crate::core::AiPaths) -> Vec<AiTool> {
     let h = home();
+    let ov = |base: String, custom: &str| -> std::path::PathBuf {
+        if custom.trim().is_empty() { base.into() } else { crate::core::expand_tilde(custom) }
+    };
     let mut tools = vec![];
 
     // ZCode
-    let zcode_dir = h.join(".zcode");
+    let zcode_dir = ov(h.join(".zcode").to_string_lossy().to_string(), &overrides.zcode);
     let zcode_detected = zcode_dir.exists();
     tools.push(AiTool {
         name: "ZCode".into(),
@@ -145,7 +148,7 @@ fn detect_tools() -> Vec<AiTool> {
     });
 
     // Claude Code
-    let claude_dir = h.join(".claude").join("projects");
+    let claude_dir = ov(h.join(".claude").to_string_lossy().to_string(), &overrides.claude).join("projects");
     let claude_detected = claude_dir.exists();
     tools.push(AiTool {
         name: "Claude Code".into(),
@@ -161,7 +164,8 @@ fn detect_tools() -> Vec<AiTool> {
 
     // Cursor
     let cursor_candidates = [
-        h.join(".config/Cursor/User/globalStorage/state.vscdb"),
+        ov(h.join(".config/Cursor").to_string_lossy().to_string(), &overrides.cursor)
+            .join("User/globalStorage/state.vscdb"),
         h.join("Library/Application Support/Cursor/User/globalStorage/state.vscdb"),
         h.join("AppData/Roaming/Cursor/User/globalStorage/state.vscdb"),
     ];
@@ -176,7 +180,8 @@ fn detect_tools() -> Vec<AiTool> {
 
     // Trae
     let trae_candidates = [
-        h.join(".config/Trae/User/globalStorage/state.vscdb"),
+        ov(h.join(".config/Trae").to_string_lossy().to_string(), &overrides.trae)
+            .join("User/globalStorage/state.vscdb"),
         h.join("Library/Application Support/Trae/User/globalStorage/state.vscdb"),
         h.join("AppData/Roaming/Trae/User/globalStorage/state.vscdb"),
     ];
@@ -190,7 +195,7 @@ fn detect_tools() -> Vec<AiTool> {
     });
 
     // DSH (DeepSeek Harness)
-    let dsh_dir = h.join(".dsh").join("sessions");
+    let dsh_dir = ov(h.join(".dsh").to_string_lossy().to_string(), &overrides.dsh).join("sessions");
     let dsh_detected = dsh_dir.exists();
     tools.push(AiTool {
         name: "DSH".into(),
@@ -228,7 +233,7 @@ pub fn ai_status_impl(state: &AppState) -> AiStatus {
         .unwrap_or_default();
     let commit = last_commit(&repo);
 
-    let mut tools = detect_tools();
+    let mut tools = detect_tools(&state.cfg().ai_paths);
     for t in tools.iter_mut() {
         t.last_sync = commit.clone();
     }

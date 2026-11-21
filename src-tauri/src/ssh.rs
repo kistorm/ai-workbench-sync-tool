@@ -909,7 +909,6 @@ pub async fn push_ssh_config(state: State<'_, AppState>) -> Result<String, Strin
             Err(e) => return Err(format!("提交失败: {}", e)),
         };
 
-        let ssh_env = crate::sync::git_ssh_env(&st);
         let branch = run_cmd("git", &["-C", &repo_str, "branch", "--show-current"], &[])?
             .stdout
             .trim()
@@ -918,7 +917,7 @@ pub async fn push_ssh_config(state: State<'_, AppState>) -> Result<String, Strin
 
         // 远端有分支才拉取（首次推送跳过，否则报 couldn't find remote ref）
         if crate::sync::remote_has_branch(&repo, &branch) {
-            let pull = crate::sync::git_pull_merge(&repo, &branch, &ssh_env)?;
+            let pull = crate::sync::git_pull_merge(&repo, &branch, &[])?;
             if !pull.ok {
                 let _ = run_cmd_dir("git", &["rebase", "--abort"], &repo, &[]);
                 return Err(format!("拉取合并失败：{}", pull.combined()));
@@ -932,7 +931,7 @@ pub async fn push_ssh_config(state: State<'_, AppState>) -> Result<String, Strin
                 "git",
                 &["push", "-q", "-u", "origin", &branch],
                 &repo,
-                &ssh_env,
+                &[],
             );
             match p {
                 Ok(r) if r.ok => {
@@ -982,7 +981,6 @@ pub async fn force_pull_ssh_config(state: State<'_, AppState>) -> Result<String,
         crate::sync::apply_remote(&repo, &cfg.git_repo)?;
 
         // 网络参数：统一 GIT_SSH_COMMAND（github 走 443），失败自动重试 3 次
-        let ssh_env = crate::sync::git_ssh_env(&st);
 
         // 性能优化：SSH 单独恢复只需要 assh.yml 一个文件。
         // 用 blobless 部分克隆 + 浅拉取，避免把整个数据仓库（数百 MB）都下载下来。
@@ -1018,7 +1016,7 @@ pub async fn force_pull_ssh_config(state: State<'_, AppState>) -> Result<String,
                     "--no-tags",
                     "origin",
                 ],
-                &ssh_env,
+                &[],
             );
             match f {
                 Ok(r) if r.ok => {
@@ -1038,7 +1036,7 @@ pub async fn force_pull_ssh_config(state: State<'_, AppState>) -> Result<String,
                 let f = run_cmd(
                     "git",
                     &["-C", &repo_str, "fetch", "-q", "--depth=1", "origin"],
-                    &ssh_env,
+                    &[],
                 );
                 match f {
                     Ok(r) if r.ok => {
