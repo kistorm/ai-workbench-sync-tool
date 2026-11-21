@@ -29,6 +29,30 @@ fn write_auto_sync_script(state: &AppState) -> Result<PathBuf, String> {
     let ai_dir = expand_tilde(&cfg.ai_sync_dir);
     let notes_dir = expand_tilde(&cfg.notes_dir);
     let log_path = home().join(".local/state/nexus-workbench-sync.log");
+    // 定时脚本同样使用自包含 SSH 参数，不依赖本机 ~/.ssh/config（assh 等）
+    let key_path = expand_tilde(&cfg.ssh_key).to_string_lossy().replace('\\', "/");
+    let host = cfg
+        .git_repo
+        .split('@')
+        .nth(1)
+        .and_then(|x| x.split(':').next())
+        .unwrap_or("");
+    let gh = if host == "github.com" {
+        " -o HostName=ssh.github.com -o Port=443"
+    } else {
+        ""
+    };
+    let ssh_export = if key_path.trim().is_empty() {
+        format!(
+            "export GIT_SSH_COMMAND=\"ssh -F /dev/null -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new{}\"",
+            gh
+        )
+    } else {
+        format!(
+            "export GIT_SSH_COMMAND=\"ssh -F /dev/null -i \\\"{}\\\" -o IdentitiesOnly=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new{}\"",
+            key_path, gh
+        )
+    };
 
     let script = format!(
         r#"#!/usr/bin/env bash
@@ -36,6 +60,7 @@ fn write_auto_sync_script(state: &AppState) -> Result<PathBuf, String> {
 set -u
 LOG="{log}"
 mkdir -p "$(dirname "$LOG")"
+{ssh_export}
 echo "[$(date -Is)] ===== auto sync start =====" >> "$LOG"
 
 # 1. SSH 配置仓库
@@ -46,7 +71,7 @@ if [ -d "{ssh_repo}/.git" ]; then
     git add -A
     git commit -qm "auto: $(date +%F_%T)" 2>/dev/null || true
     git pull -q --rebase --autostash -X ours origin "$(git rev-parse --abbrev-ref HEAD)" 2>>"$LOG" || git rebase --abort 2>/dev/null || true
-    git push -q 2>>"$LOG"
+    for i in 1 2 3 4 5; do git push -q origin "$(git rev-parse --abbrev-ref HEAD)" 2>>"$LOG" && break; sleep 5; done
   ) && echo "[$(date -Is)] ssh-config ok" >> "$LOG" || echo "[$(date -Is)] ssh-config failed" >> "$LOG"
 else
   echo "[$(date -Is)] ssh-config skipped (no repo)" >> "$LOG"
@@ -67,10 +92,21 @@ if [ -d "{notes_dir}/.git" ]; then
     git add -A
     git commit -qm "auto notes: $(date +%F_%T)" 2>/dev/null || true
     git pull -q --rebase --autostash origin "$(git rev-parse --abbrev-ref HEAD)" 2>>"$LOG" || git rebase --abort 2>/dev/null || true
-    git push -q 2>>"$LOG"
+    for i in 1 2 3 4 5; do git push -q origin "$(git rev-parse --abbrev-ref HEAD)" 2>>"$LOG" && break; sleep 5; done
   ) && echo "[$(date -Is)] notes ok" >> "$LOG" || echo "[$(date -Is)] notes failed" >> "$LOG"
 else
   echo "[$(date -Is)] notes skipped (no repo)" >> "$LOG"
+fi
+
+# 4. 统一仓库最终推送（AI 收集可能产生新提交；放最后确保一起上云）
+if [ -d "{ssh_repo}/.git" ]; then
+  (
+    cd "{ssh_repo}" || exit 0
+    git add -A
+    git commit -qm "auto final: $(date +%F_%T)" 2>/dev/null || true
+    git pull -q --rebase --autostash -X ours origin "$(git rev-parse --abbrev-ref HEAD)" 2>>"$LOG" || git rebase --abort 2>/dev/null || true
+    for i in 1 2 3 4 5; do git push -q origin "$(git rev-parse --abbrev-ref HEAD)" 2>>"$LOG" && break; sleep 5; done
+  ) && echo "[$(date -Is)] final push ok" >> "$LOG" || echo "[$(date -Is)] final push failed" >> "$LOG"
 fi
 
 echo "[$(date -Is)] ===== auto sync end =====" >> "$LOG"
@@ -78,6 +114,7 @@ echo "[$(date -Is)] ===== auto sync end =====" >> "$LOG"
         log = log_path.display(),
         ssh_repo = ssh_repo.display(),
         ai_dir = ai_dir.display(),
+        ssh_export = ssh_export,
         notes_dir = notes_dir.display(),
     );
 

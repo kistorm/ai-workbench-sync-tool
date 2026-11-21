@@ -302,8 +302,21 @@ pub(crate) fn remote_has_branch(dir: &Path, branch: &str) -> bool {
 }
 
 /// 推送（首次自动设置 upstream，兼容空仓库）
-fn push_branch(dir: &Path, branch: &str) -> CmdResultResult {
-    run_cmd_dir("git", &["push", "-q", "-u", "origin", branch], dir, &[])
+fn push_branch(dir: &Path, branch: &str, envs: &[(&str, String)]) -> CmdResultResult {
+    // 网络抖动时重试 5 次（3/5/8/10 秒递增），避免自动同步只提交不推送
+    let waits = [3u64, 5, 8, 10];
+    let mut last: CmdResultResult = Err("未执行".into());
+    for attempt in 1..=5usize {
+        let r = run_cmd_dir("git", &["push", "-q", "-u", "origin", branch], dir, envs);
+        match &r {
+            Ok(res) if res.ok => return r,
+            _ => last = r,
+        }
+        if attempt < 5 {
+            std::thread::sleep(std::time::Duration::from_secs(waits[attempt - 1]));
+        }
+    }
+    last
 }
 
 type CmdResultResult = Result<crate::core::CmdResult, String>;
@@ -330,6 +343,7 @@ pub async fn git_sync(
     tauri::async_runtime::spawn_blocking(move || {
         // 让配置里的仓库地址生效
         apply_remote(&target, &repo)?;
+        let ssh_env = git_ssh_env(&st);
         let action = action.to_lowercase();
         let mut log_buf = String::new();
         match action.as_str() {
@@ -348,13 +362,13 @@ pub async fn git_sync(
                 )?;
                 log_buf.push_str(&commit.combined());
                 let branch = current_branch(&target);
-                let pull = git_pull_merge(&target, &branch, &[])?;
+                let pull = git_pull_merge(&target, &branch, &ssh_env)?;
                 log_buf.push_str(&pull.combined());
                 if !pull.ok {
                     let _ = run_cmd_dir("git", &["rebase", "--abort"], &target, &[]);
                     return Err(format!("拉取合并冲突，已中止。\n{}", log_buf));
                 }
-                let push = run_cmd_dir("git", &["push", "-q", "-u", "origin", &branch], &target, &[])?;
+                let push = run_cmd_dir("git", &["push", "-q", "-u", "origin", &branch], &target, &ssh_env)?;
                 log_buf.push_str(&push.combined());
                 if !push.ok {
                     return Err(log_buf);
@@ -366,7 +380,7 @@ pub async fn git_sync(
                 if !remote_has_branch(&target, &branch) {
                     return Ok("远端为空，无需拉取".to_string());
                 }
-                let pull = git_pull_merge(&target, &branch, &[])?;
+                let pull = git_pull_merge(&target, &branch, &ssh_env)?;
                 log_buf.push_str(&pull.combined());
                 if !pull.ok {
                     let _ = run_cmd_dir("git", &["rebase", "--abort"], &target, &[]);
@@ -912,10 +926,11 @@ pub fn sync_data_repo(st: &AppState, action: &str) -> SyncItemResult {
     }
 
     let branch = current_branch(&repo_dir);
+    let ssh_env = git_ssh_env(st);
 
     // 远端有分支才拉取（空仓库首次推送时跳过，否则会报 couldn't find remote ref）
     if remote_has_branch(&repo_dir, &branch) {
-        let pull = git_pull_merge(&repo_dir, &branch, &[]);
+        let pull = git_pull_merge(&repo_dir, &branch, &ssh_env);
         if !pull.as_ref().map(|p| p.ok).unwrap_or(false) {
             let _ = run_cmd_dir("git", &["rebase", "--abort"], &repo_dir, &[]);
             return SyncItemResult {
@@ -950,7 +965,7 @@ pub fn sync_data_repo(st: &AppState, action: &str) -> SyncItemResult {
         };
     }
 
-    match push_branch(&repo_dir, &branch) {
+    match push_branch(&repo_dir, &branch, &ssh_env) {
         Ok(p) if p.ok => SyncItemResult {
             name,
             ok: true,
