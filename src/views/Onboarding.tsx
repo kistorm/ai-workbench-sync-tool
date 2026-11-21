@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import type { Diagnosis, RunningAction } from "../api";
+import type { AiPaths, Diagnosis, RunningAction } from "../api";
 
 /**
  * 首次使用引导
@@ -22,6 +22,13 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   const [elapsed, setElapsed] = useState(0);
   const [countdown, setCountdown] = useState(0);
   const pwdRef = useRef<HTMLInputElement>(null);
+  const [aiDefaults, setAiDefaults] = useState<AiPaths | null>(null);
+  const [aiPaths, setAiPaths] = useState<Record<string, string>>({});
+
+  // 加载当前平台的 AI 工具默认路径（作为 placeholder；可自行覆盖）
+  useEffect(() => {
+    api.aiDefaultPaths().then(setAiDefaults).catch(() => {});
+  }, []);
 
   // Shell 会因轮询重新渲染，用 ref 固定 onDone，避免倒计时被重置
   const onDoneRef = useRef(onDone);
@@ -147,6 +154,11 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     setProg(null);
     try {
       const msg = await api.onboard(mode, repo.trim(), pwd);
+      // 持久化 AI 工具路径覆盖（收集/恢复时按这些目录读写）
+      try {
+        const c = await api.getSyncConfig();
+        await api.saveSyncConfig({ ...c, ai_paths: aiPaths });
+      } catch {}
       setResult(msg);
     } catch (e) {
       const msg = String(e);
@@ -291,6 +303,39 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                 className={inputCls}
               />
             </Field>
+
+            <div className="rounded-xl border border-white/5 bg-white/[0.02] px-4 py-3">
+              <div className="font-mono text-[10px] tracking-[0.14em] text-[var(--color-nexus-text-faint)] uppercase mb-1">
+                AI 会话数据路径（可选）
+              </div>
+              <p className="font-mono text-[10px] text-[var(--color-nexus-text-faint)] mb-3 leading-relaxed">
+                按当前系统已自动填入默认路径；如你的 AI 工具装在其他位置可修改，留空 = 系统默认。恢复时会写入这些目录
+              </p>
+              <div className="space-y-2.5">
+                {([
+                  ["zcode", "ZCode"],
+                  ["workbuddy", "WorkBuddy"],
+                  ["doubao", "豆包 (Doubao)"],
+                  ["claude", "Claude Code"],
+                  ["dsh", "DeepSeek Harness"],
+                  ["cursor", "Cursor"],
+                  ["trae", "Trae"],
+                ] as const).map(([key, label]) => (
+                  <div key={key} className="flex items-center gap-3">
+                    <span className="font-mono text-[10.5px] text-[var(--color-nexus-text-dim)] w-40 shrink-0">{label}</span>
+                    <input
+                      value={aiPaths[key] ?? ""}
+                      onChange={(e) => setAiPaths((prev) => ({ ...prev, [key]: e.target.value }))}
+                      placeholder={aiDefaults?.[key as keyof AiPaths] ?? "系统默认"}
+                      disabled={busy}
+                      spellCheck={false}
+                      className="flex-1 bg-white/[0.03] border border-white/5 rounded-lg px-2.5 py-1.5 font-mono text-[11px] text-[var(--color-nexus-text)] placeholder:text-[var(--color-nexus-text-faint)] focus:border-[var(--color-neon-purple)]/50 focus:outline-none transition"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
             <Field label="确认主密码">
               <input
                 type="password"
