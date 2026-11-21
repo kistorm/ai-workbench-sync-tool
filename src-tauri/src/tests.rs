@@ -801,3 +801,21 @@ fn it_restore_secrets_from_repo() {
 
     let _ = fs::remove_dir_all(&base);
 }
+
+#[test]
+fn it_zcode_session_count_reads_sqlite() {
+    let base = std::env::temp_dir().join(format!("nexus-zcode-count-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    let zcode = base.join(".zcode");
+    fs::create_dir_all(zcode.join("cli").join("db")).unwrap();
+    let db = zcode.join("cli").join("db").join("db.sqlite");
+    {
+        let con = rusqlite::Connection::open(&db).unwrap();
+        con.execute_batch(
+            "create table session(id integer primary key autoincrement, title text);             insert into session(title) values ('a'),('b'),('c'),('d'),('e');",
+        )
+        .unwrap();
+    }
+    assert_eq!(crate::ai::zcode_session_count(&zcode), 5);
+    let _ = fs::remove_dir_all(&base);
+}

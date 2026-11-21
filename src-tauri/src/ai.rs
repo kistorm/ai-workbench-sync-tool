@@ -104,6 +104,27 @@ fn last_commit(dir: &PathBuf) -> String {
         .unwrap_or_else(|| "无提交".into())
 }
 
+/// ZCode 的真实会话数：db.sqlite 的 session 表（rollout 只是模型 IO 日志，数量少且不准）
+pub(crate) fn zcode_session_count(zcode_dir: &std::path::Path) -> u64 {
+    let db = zcode_dir.join("cli").join("db").join("db.sqlite");
+    if db.is_file() {
+        if let Ok(con) = rusqlite::Connection::open_with_flags(
+            &db,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        ) {
+            if let Ok(n) = con.query_row("select count(*) from session", [], |r| {
+                r.get::<_, i64>(0)
+            }) {
+                if n >= 0 {
+                    return n as u64;
+                }
+            }
+        }
+    }
+    // 数据库不可用时回退到 rollout 日志数
+    count_files(&zcode_dir.join("cli").join("rollout"), ".jsonl")
+}
+
 fn detect_tools() -> Vec<AiTool> {
     let h = home();
     let mut tools = vec![];
@@ -115,8 +136,7 @@ fn detect_tools() -> Vec<AiTool> {
         name: "ZCode".into(),
         detected: zcode_detected,
         sessions: if zcode_detected {
-            // 以 rollout 会话日志数近似（db.sqlite 内部才是权威数据）
-            count_files(&zcode_dir.join("cli").join("rollout"), ".jsonl")
+            zcode_session_count(&zcode_dir)
         } else {
             0
         },
