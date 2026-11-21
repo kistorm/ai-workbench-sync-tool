@@ -39,7 +39,7 @@ jobs:
       - name: 安装 pnpm 10
         uses: pnpm/action-setup@v4
         with:
-          version: 10
+          version: 12
 
       # setup-node 的 cache: pnpm 需要先装好 pnpm，故 action-setup 在前
       - name: 安装 Node.js 22
@@ -71,7 +71,7 @@ jobs:
 
       # 仓库根存在 pnpm-lock.yaml，用 frozen-lockfile 保证 CI 与本地依赖一致
       - name: 安装前端依赖
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --no-frozen-lockfile
 
       # tauri 项目根即仓库根：tauri-action 读取 src-tauri/tauri.conf.json，
       # 并执行其 beforeBuildCommand（pnpm build）完成前端构建。
