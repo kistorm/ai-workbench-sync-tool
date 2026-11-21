@@ -969,6 +969,7 @@ fn sync_ai_repo(st: &AppState, action: &str) -> SyncItemResult {
         ("ZCODE_HOME", &ap.zcode),
         ("CLAUDE_HOME", &ap.claude),
         ("DSH_HOME", &ap.dsh),
+        ("DOUBAO_HOME", &ap.doubao),
     ] {
         if !val.trim().is_empty() {
             envs.push((key, crate::core::expand_tilde(val).to_string_lossy().to_string()));

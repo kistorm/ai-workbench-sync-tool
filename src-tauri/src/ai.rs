@@ -194,6 +194,35 @@ fn detect_tools(overrides: &crate::core::AiPaths) -> Vec<AiTool> {
         healthy: trae_detected,
     });
 
+    // 豆包桌面版（Electron 应用；聊天记录主要在厂商云端，本地同步其配置与数据目录做备份）
+    let doubao_candidates = [
+        ov(
+            h.join(".config/Doubao").to_string_lossy().to_string(),
+            &overrides.doubao,
+        ),
+        h.join("Library/Application Support/Doubao"),
+        {
+            let app_data = std::env::var("APPDATA")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| h.join("AppData/Roaming"));
+            app_data.join("Doubao")
+        },
+    ];
+    let doubao_dir = doubao_candidates.into_iter().find(|p| p.is_dir());
+    let doubao_detected = doubao_dir.is_some();
+    tools.push(AiTool {
+        name: "豆包".into(),
+        detected: doubao_detected,
+        sessions: if doubao_detected {
+            let d = doubao_dir.as_ref().unwrap();
+            count_files(d, ".json") + count_files(d, ".jsonl")
+        } else {
+            0
+        },
+        last_sync: String::new(),
+        healthy: doubao_detected,
+    });
+
     // DSH (DeepSeek Harness)
     let dsh_dir = ov(h.join(".dsh").to_string_lossy().to_string(), &overrides.dsh).join("sessions");
     let dsh_detected = dsh_dir.exists();

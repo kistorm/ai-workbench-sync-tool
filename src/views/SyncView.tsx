@@ -403,6 +403,7 @@ export function SyncView({ theme, onThemeChange, appName, onAppNameChange }: Syn
               <div className="space-y-3">
                 {([
                   ["zcode", "ZCode", aiDefaults?.zcode],
+                  ["doubao", "豆包 (Doubao 桌面版)", aiDefaults?.doubao],
                   ["claude", "Claude Code", aiDefaults?.claude],
                   ["dsh", "DeepSeek Harness (DSH)", aiDefaults?.dsh],
                   ["cursor", "Cursor", aiDefaults?.cursor],

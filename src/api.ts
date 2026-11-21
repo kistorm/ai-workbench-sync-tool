@@ -161,6 +161,7 @@ export interface AppInfo {
 
 export interface AiPaths {
   zcode: string;
+  doubao: string;
   claude: string;
   dsh: string;
   cursor: string;
