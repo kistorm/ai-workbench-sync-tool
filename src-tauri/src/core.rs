@@ -849,14 +849,8 @@ pub fn ai_default_paths() -> AiPaths {
     {
         AiPaths {
             zcode: home.join(".zcode").to_string_lossy().to_string(),
-            doubao: {
-                #[cfg(target_os = "macos")]
-                { home.join("Library/Application Support/Doubao").to_string_lossy().to_string() }
-                #[cfg(target_os = "windows")]
-                { format!("{}\\\\Doubao", std::env::var("APPDATA").unwrap_or_else(|_| home.join("AppData/Roaming").to_string_lossy().to_string())) }
-                #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-                { home.join(".config/Doubao").to_string_lossy().to_string() }
-            },
+            claude: home.join(".claude").to_string_lossy().to_string(),
+            dsh: home.join(".dsh").to_string_lossy().to_string(),
             cursor: home
                 .join("Library/Application Support/Cursor")
                 .to_string_lossy()
