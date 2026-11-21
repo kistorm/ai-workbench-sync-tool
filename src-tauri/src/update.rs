@@ -1,6 +1,6 @@
 //! 应用自更新：下载 GitHub Release 安装包并自动安装。
 //!
-//! - macOS：下载 `*_macos-universal.zip`，解压后由后台脚本等待应用退出，
+//! - macOS：下载 `*_macos-{aarch64|x86_64}.zip`（按本机架构），解压后由后台脚本等待应用退出，
 //!   替换 /Applications 下的 app、清除隔离标记并重启
 //! - Windows：下载 `*_x64-setup.exe`，以 `/S` 静默安装后重启
 //! - Linux：下载 `*_amd64.AppImage`，覆盖当前 AppImage 并重启
@@ -103,10 +103,15 @@ fn latest_remote_version() -> Result<String, String> {
 }
 
 /// 当前平台对应的 Release 资源名
+/// macOS 为双架构包（CI 拆分 aarch64/x86_64 构建），按本机架构选包
 fn asset_name(version: &str) -> Option<String> {
     #[cfg(target_os = "macos")]
     {
-        Some(format!("nexus-workbench_{}_macos-universal.zip", version))
+        Some(format!(
+            "nexus-workbench_{}_macos-{}.zip",
+            version,
+            std::env::consts::ARCH
+        ))
     }
     #[cfg(target_os = "windows")]
     {
@@ -413,7 +418,14 @@ mod tests {
         let name = asset_name("0.2.6").expect("当前平台应有资源名");
         assert!(name.contains("0.2.6"), "资源名应包含版本号: {}", name);
         #[cfg(target_os = "macos")]
-        assert!(name.ends_with("macos-universal.zip"));
+        {
+            let arch = std::env::consts::ARCH;
+            assert!(
+                name.ends_with(&format!("macos-{arch}.zip")),
+                "macOS 资源名应按架构命名: {}",
+                name
+            );
+        }
         #[cfg(target_os = "windows")]
         assert!(name.ends_with("x64-setup.exe"));
         #[cfg(target_os = "linux")]
