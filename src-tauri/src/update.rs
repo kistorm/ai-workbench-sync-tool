@@ -107,8 +107,10 @@ fn latest_remote_version() -> Result<String, String> {
 fn asset_name(version: &str) -> Option<String> {
     #[cfg(target_os = "macos")]
     {
+        // CI 资产名为完整 triple（如 macos-aarch64-apple-darwin.zip），
+        // ARCH（aarch64/x86_64）恰为 triple 前缀，直接拼接
         Some(format!(
-            "nexus-workbench_{}_macos-{}.zip",
+            "nexus-workbench_{}_macos-{}-apple-darwin.zip",
             version,
             std::env::consts::ARCH
         ))
@@ -421,8 +423,8 @@ mod tests {
         {
             let arch = std::env::consts::ARCH;
             assert!(
-                name.ends_with(&format!("macos-{arch}.zip")),
-                "macOS 资源名应按架构命名: {}",
+                name.ends_with(&format!("macos-{arch}-apple-darwin.zip")),
+                "macOS 资源名应与 CI 命名一致: {}",
                 name
             );
         }
