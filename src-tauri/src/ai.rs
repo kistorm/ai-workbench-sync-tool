@@ -223,6 +223,46 @@ fn detect_tools(overrides: &crate::core::AiPaths) -> Vec<AiTool> {
         healthy: doubao_detected,
     });
 
+    // WorkBuddy（Electron 应用，目录名大小写不一）
+    let wb_candidates = [
+        ov(
+            h.join(".config/WorkBuddy").to_string_lossy().to_string(),
+            &overrides.workbuddy,
+        ),
+        ov(
+            h.join(".config/workbuddy").to_string_lossy().to_string(),
+            &overrides.workbuddy,
+        ),
+        h.join("Library/Application Support/WorkBuddy"),
+        h.join("Library/Application Support/workbuddy"),
+        {
+            let app_data = std::env::var("APPDATA")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| h.join("AppData/Roaming"));
+            app_data.join("WorkBuddy")
+        },
+        {
+            let app_data = std::env::var("APPDATA")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| h.join("AppData/Roaming"));
+            app_data.join("workbuddy")
+        },
+    ];
+    let workbuddy_dir = wb_candidates.into_iter().find(|p| p.is_dir());
+    let workbuddy_detected = workbuddy_dir.is_some();
+    tools.push(AiTool {
+        name: "WorkBuddy".into(),
+        detected: workbuddy_detected,
+        sessions: if workbuddy_detected {
+            let d = workbuddy_dir.as_ref().unwrap();
+            count_files(d, ".json") + count_files(d, ".jsonl")
+        } else {
+            0
+        },
+        last_sync: String::new(),
+        healthy: workbuddy_detected,
+    });
+
     // DSH (DeepSeek Harness)
     let dsh_dir = ov(h.join(".dsh").to_string_lossy().to_string(), &overrides.dsh).join("sessions");
     let dsh_detected = dsh_dir.exists();

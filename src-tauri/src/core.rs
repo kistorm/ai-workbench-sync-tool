@@ -72,6 +72,8 @@ pub struct AiPaths {
     #[serde(default)]
     pub zcode: String,
     #[serde(default)]
+    pub workbuddy: String,
+    #[serde(default)]
     pub doubao: String,
     #[serde(default)]
     pub claude: String,
@@ -867,6 +869,10 @@ pub fn ai_default_paths() -> AiPaths {
                 .join("Library/Application Support/Doubao")
                 .to_string_lossy()
                 .to_string(),
+            workbuddy: home
+                .join("Library/Application Support/WorkBuddy")
+                .to_string_lossy()
+                .to_string(),
         }
     }
     #[cfg(target_os = "windows")]
@@ -881,6 +887,7 @@ pub fn ai_default_paths() -> AiPaths {
             cursor: format!("{}\\Cursor", app_data),
             trae: format!("{}\\Trae", app_data),
             doubao: format!("{}\\Doubao", app_data),
+            workbuddy: format!("{}\\WorkBuddy", app_data),
         }
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -894,6 +901,7 @@ pub fn ai_default_paths() -> AiPaths {
             cursor: format!("{}/Cursor", xdg),
             trae: format!("{}/Trae", xdg),
             doubao: format!("{}/Doubao", xdg),
+            workbuddy: format!("{}/WorkBuddy", xdg),
         }
     }
 }
